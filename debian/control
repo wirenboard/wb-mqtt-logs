@@ -1,0 +1,15 @@
+Source: wb-mqtt-logs
+Maintainer: Evgeny Boger <boger@contactless.ru>
+Section: misc
+Priority: optional
+Standards-Version: 3.9.2
+Build-Depends: debhelper (>= 10), 
+               pkg-config, 
+               libjsoncpp-dev, 
+               libwbmqtt1-dev (>= 1.0.10),
+               libwbmqtt1-test-utils (>= 1.0.10)
+
+Package: wb-mqtt-logs
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libjsoncpp0 | libjsoncpp1, libwbmqtt1 (>= 1.0.10)
+Description: Wiren Board journald to MQTT gateway

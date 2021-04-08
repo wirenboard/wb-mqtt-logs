@@ -1,0 +1,5 @@
+wb-mqtt-logs (0.1.0) unstable; urgency=medium
+
+  * Initial release. 
+
+ -- Petr Krasnoshchekov <petr.krasnoshchekov@wirenboard.ru>  Tue, 06 May 2021 11:28:00 +0500
