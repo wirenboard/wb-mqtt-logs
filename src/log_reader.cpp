@@ -238,6 +238,10 @@ namespace
                 }
             }
         }
+        if (res.size() > 2) {
+            // cursor is needed only for the first and the last record
+            std::for_each(++res.begin(), --res.end(), [](auto& item) { item.removeMember("cursor"); });
+        }
         return res;
     }
 
