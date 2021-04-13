@@ -1,7 +1,6 @@
 [Unit]
 Description=Wiren Board journald to MQTT gateway
-Wants=wb-hwconf-manager.service wb-modules.service
-After=network.target wb-hwconf-manager.service wb-modules.service mosquitto.service
+After=network.target mosquitto.service
 
 [Service]
 Type=simple
