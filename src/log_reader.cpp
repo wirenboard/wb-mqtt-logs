@@ -96,6 +96,7 @@ namespace
     {
         std::string Query;
         bool        ReverseOutput = false;
+        bool        ParseService = true;
     };
 
     TMakeJournalctlQueryResult MakeJournalctlQuery(const Json::Value& params)
@@ -106,6 +107,7 @@ namespace
         auto service = params.get("service", "").asString();
         if (!service.empty()) {
             ss << " -u " << service;
+            res.ParseService = false;
         }
         ss << " -n " << GetMaxLogsEntries(params);
         if (params.isMember("boot")) {
@@ -191,6 +193,16 @@ namespace
         entry["cursor"] = s;
     }
 
+    void ParseService(const std::string& s, Json::Value& entry)
+    {
+        const std::string SERVICE_SUFFIX(".service");
+        if (WBMQTT::StringHasSuffix(s, SERVICE_SUFFIX)) {
+            entry["service"] = s.substr(0, s.length() - SERVICE_SUFFIX.length());
+        } else {
+            entry["service"] = s;
+        }
+    }
+
     typedef std::function<void(const std::string&, Json::Value&)> TJournaldParamToJsonFn;
     const std::vector<std::pair<std::string, TJournaldParamToJsonFn>> Prefixes = {
         {"MESSAGE=",              ParseMsg      },
@@ -202,6 +214,10 @@ namespace
     Json::Value MakeJouralctlRequest(const Json::Value& params)
     {
         auto query = MakeJournalctlQuery(params);
+        auto prefixes(Prefixes);
+        if (query.ParseService) {
+            prefixes.emplace_back("_SYSTEMD_UNIT=", ParseService);
+        }
         LOG(Debug) << query.Query;
         Json::Value res(Json::arrayValue);
         Json::Value entry;
@@ -210,7 +226,7 @@ namespace
                 res.append(entry);
                 entry.clear();
             } else {
-                std::any_of(Prefixes.begin(), Prefixes.end(), [&](const auto& p){
+                std::any_of(prefixes.begin(), prefixes.end(), [&](const auto& p){
                     if (StringStartsWith(s, p.first)) {
                         p.second(s.substr(p.first.length()), entry);
                         return true;
