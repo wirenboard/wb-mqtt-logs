@@ -7,6 +7,7 @@
 #include <wblib/exceptions.h>
 #include <wblib/json_utils.h>
 #include <wblib/mqtt.h>
+#include <syslog.h>
 
 using namespace WBMQTT;
 
@@ -154,21 +155,23 @@ namespace
 
     // libwbmqtt1 log prefixes to syslog severity levels map
     const std::vector<std::pair<std::string, int>> LibWbMqttLogLevels = {
-        {"ERROR:",   3},
-        {"WARNING:", 4},
-        {"DEBUG:",   7}
+        {"ERROR:",   LOG_ERR    },
+        {"WARNING:", LOG_WARNING},
+        {"DEBUG:",   LOG_DEBUG  }
     };
 
     void ParseMsg(const std::string& s, Json::Value& entry)
     {
         entry["msg"] = s;
-        std::any_of(LibWbMqttLogLevels.begin(), LibWbMqttLogLevels.end(), [&](const auto& p){
-            if (StringStartsWith(s, p.first)) {
-                entry["level"] = p.second;
-                return true;
-            }
-            return false;
-        });
+        if (!entry.isMember("level")) {
+            std::any_of(LibWbMqttLogLevels.begin(), LibWbMqttLogLevels.end(), [&](const auto& p){
+                if (StringStartsWith(s, p.first)) {
+                    entry["level"] = p.second;
+                    return true;
+                }
+                return false;
+            });
+        }
     }
 
     void ParseTimestamp(const std::string& s, Json::Value& entry)
@@ -183,8 +186,11 @@ namespace
 
     void ParsePriority(const std::string& s, Json::Value& entry)
     {
-        if (!entry.isMember("level")) {
-            entry["level"] = atoi(s.c_str());
+        auto level = atoi(s.c_str());
+        // journald sets LOG_INFO priority for all unprefixed messages got fom stderr/stdout
+        // They priority is set in ParseMsg according to a prefix.
+        if (level != LOG_INFO && !entry.isMember("level")) {
+            entry["level"] = level;
         }
     }
 

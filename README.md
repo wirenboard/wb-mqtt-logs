@@ -53,6 +53,6 @@ JSON-объект со следующими полями:
 JSON-массив объектов со следующими полями:
 * *msg* - текст сообщения;
 * *service* - название сервиса, передаётся, если не было указано в запросе; 
-* *level* - [уровень сообщения](https://en.wikipedia.org/wiki/Syslog#Severity_level);
+* *level* - [уровень сообщения](https://en.wikipedia.org/wiki/Syslog#Severity_level), не передаётся для уровня `SYS_INFO(6)`;
 * *time* - временная метка (UNIX timestamp UTC);
 * *cursor* - [уникальный идентификатор сообщения в journald](https://www.freedesktop.org/software/systemd/man/systemd.journal-fields.html#__CURSOR=). Может присутствовать в первом и последнем объекте массива.
