@@ -92,8 +92,15 @@ namespace
         return std::min(MAX_LOG_RECORDS, params.get("limit", MAX_LOG_RECORDS).asUInt());
     }
 
-    std::string MakeJournalctlQuery(const Json::Value& params, bool includeCursorEntry)
+    struct TMakeJournalctlQueryResult
     {
+        std::string Query;
+        bool        ReverseOutput = false;
+    };
+
+    TMakeJournalctlQueryResult MakeJournalctlQuery(const Json::Value& params)
+    {
+        TMakeJournalctlQueryResult res;
         std::stringstream ss;
         ss << "journalctl --no-pager -o export";
         auto service = params.get("service", "").asString();
@@ -109,30 +116,27 @@ namespace
             time_t t = params["time"].asInt64();
             gmtime_r(&t, &dt);
             ss << " -r -U " << "\"" << std::put_time(&dt, "%Y-%m-%d %H:%M:%S") << "\"";
-            return ss.str();
+            res.Query = ss.str();
+            return res;
         }
         if (params.isMember("cursor")) {
             auto& cursor = params["cursor"];
             if (cursor.isMember("id") && cursor.isMember("direction")) {
-                ss << (includeCursorEntry ? " --cursor=" : " --after-cursor=");
-                ss << "\"" << cursor["id"].asString() << "\"";
+                ss << " --after-cursor=\"" << cursor["id"].asString() << "\"";
                 if (cursor["direction"].asString() == "backward") {
                     ss << " -r";
+                } else {
+                    // Forward cursor queries return rows in ascending order, but we want a descending order
+                    res.ReverseOutput = true;
                 }
-                return ss.str();
+                res.Query = ss.str();
+                return res;
             }
         }
-        ss << " -r";
-        return ss.str();
-    }
-
-    bool IsForwardCursorQuery(const Json::Value& params)
-    {
-        if (!params.isMember("time") && params.isMember("cursor")) {
-            auto& cursor = params["cursor"];
-            return cursor.isMember("id") && cursor.isMember("direction") && (cursor["direction"].asString() != "backward");
-        }
-        return false;
+        // We can't use -r option as journalctl has a bug not returning all requested rows
+        res.Query = ss.str();
+        res.ReverseOutput = true;
+        return res;
     }
 
     Json::Value GetDmesgLogs()
@@ -195,13 +199,13 @@ namespace
         {"__CURSOR=",             ParseCursor   }
     };
 
-    Json::Value MakeJouralctlRequest(const Json::Value& params, bool includeCursorEntry)
+    Json::Value MakeJouralctlRequest(const Json::Value& params)
     {
-        auto query = MakeJournalctlQuery(params, includeCursorEntry);
-        LOG(Debug) << query;
+        auto query = MakeJournalctlQuery(params);
+        LOG(Debug) << query.Query;
         Json::Value res(Json::arrayValue);
         Json::Value entry;
-        for (const auto& s: ExecCommand(query)) {
+        for (const auto& s: ExecCommand(query.Query)) {
             if (s.empty()) {
                 res.append(entry);
                 entry.clear();
@@ -215,8 +219,7 @@ namespace
                 });
             }
         }
-        if (IsForwardCursorQuery(params)) {
-            // Forward cursor queries return rows in ascending order, but we want a descending order
+        if (query.ReverseOutput) {
             std::reverse(res.begin(), res.end());
         }
         return res;
@@ -224,20 +227,7 @@ namespace
 
     Json::Value GetJouralctlLogs(const Json::Value& params)
     {
-        Json::Value res(MakeJouralctlRequest(params, true));
-        if (IsForwardCursorQuery(params)) {
-            // Forward request can reach logs head and return less than requested rows count.
-            // So request additional rows after cursor to fill missing rows.
-            auto wantedCount =  GetMaxLogsEntries(params);
-            if (res.size() < wantedCount) {
-                Json::Value p(params);
-                p["cursor"]["direction"] = "backward";
-                p["limit"] = wantedCount - res.size();
-                for (const auto& item: MakeJouralctlRequest(p, false)) {
-                    res.append(item);
-                }
-            }
-        }
+        Json::Value res(MakeJouralctlRequest(params));
         if (res.size() > 2) {
             // cursor is needed only for the first and the last record
             std::for_each(++res.begin(), --res.end(), [](auto& item) { item.removeMember("cursor"); });
