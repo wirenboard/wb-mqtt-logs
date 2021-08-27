@@ -1,0 +1,13 @@
+[Unit]
+Description=Wiren Board journald to MQTT gateway
+After=network.target mosquitto.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=root
+ExecStart=/usr/bin/wb-mqtt-logs
+
+[Install]
+WantedBy=multi-user.target
