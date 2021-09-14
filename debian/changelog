@@ -1,3 +1,10 @@
+wb-mqtt-logs (1.1.0) unstable; urgency=medium
+
+  * Update dependency on libwbmqtt1 to support fixed libmosquitto facade
+    (required for newer mosquitto backports)
+
+ -- Nikita Maslov <nikita.maslov@wirenboard.ru>  Tue, 14 Sep 2021 19:54:02 +0300
+
 wb-mqtt-logs (1.0.0) unstable; urgency=medium
 
   * Initial release. 
