@@ -60,7 +60,7 @@ namespace
     Json::Value GetBoots()
     {
         Json::Value res;
-        auto boots = ExecCommand("journalctl --list-boots");
+        auto boots = ExecCommand("journalctl --utc --list-boots");
         std::reverse(boots.begin(), boots.end());
         for(const auto& boot: boots) {
             try {
