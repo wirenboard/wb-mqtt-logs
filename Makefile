@@ -25,7 +25,7 @@ SRC_DIRS = src
 COMMON_SRCS := $(shell find $(SRC_DIRS) \( -name *.cpp -or -name *.c \) -and -not -name main.cpp)
 COMMON_OBJS := $(COMMON_SRCS:%=$(BUILD_DIR)/%.o)
 
-LDFLAGS = -lpthread -ljsoncpp -lwbmqtt1
+LDFLAGS = -lpthread -lwbmqtt1
 CXXFLAGS = -std=c++14 -Wall -Werror -I$(SRC_DIRS) -DWBMQTT_COMMIT="$(GIT_REVISION)" -DWBMQTT_VERSION="$(DEB_VERSION)" -Wno-psabi
 CFLAGS = -Wall -I$(SRC_DIR)
 
