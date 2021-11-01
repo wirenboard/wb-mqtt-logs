@@ -1,3 +1,9 @@
+wb-mqtt-logs (1.1.3) stable; urgency=medium
+
+  * More accurate journalctl records parsing
+
+ -- Petr Krasnoshchekov <petr.krasnoshchekov@wirenboard.ru>  Mon, 01 Nov 2021 10:48:58 +0500
+
 wb-mqtt-logs (1.1.2) stable; urgency=medium
 
   * Use UTC timestamps in boot list request
