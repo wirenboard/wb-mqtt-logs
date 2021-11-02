@@ -228,18 +228,20 @@ namespace
         Json::Value res(Json::arrayValue);
         Json::Value entry;
         for (const auto& s: ExecCommand(query.Query)) {
-            if (s.empty()) {
+            if (StringStartsWith(s, "__CURSOR=") && !entry.empty()) {
                 res.append(entry);
                 entry.clear();
-            } else {
-                std::any_of(prefixes.begin(), prefixes.end(), [&](const auto& p){
-                    if (StringStartsWith(s, p.first)) {
-                        p.second(s.substr(p.first.length()), entry);
-                        return true;
-                    }
-                    return false;
-                });
             }
+            std::any_of(prefixes.begin(), prefixes.end(), [&](const auto& p){
+                if (StringStartsWith(s, p.first)) {
+                    p.second(s.substr(p.first.length()), entry);
+                    return true;
+                }
+                return false;
+            });
+        }
+        if (!entry.empty()) {
+            res.append(entry);
         }
         if (query.ReverseOutput) {
             std::reverse(res.begin(), res.end());
