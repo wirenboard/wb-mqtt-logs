@@ -3,11 +3,14 @@
 #include "log.h"
 
 #include <algorithm>
+#include <set>
+#include <regex>
 
 #include <wblib/exceptions.h>
 #include <wblib/json_utils.h>
 #include <wblib/mqtt.h>
 #include <syslog.h>
+#include <systemd/sd-journal.h>
 
 using namespace WBMQTT;
 
@@ -17,6 +20,13 @@ namespace
 {
     const auto     DMESG_SERVICE   = "dmesg";
     const uint32_t MAX_LOG_RECORDS = 100;
+
+    void SdCall(int res, const std::string& msg)
+    {
+        if (res < 0) {
+            throw std::runtime_error(std::string(msg) + strerror(-res));
+        }
+    }
 
     std::vector<std::string> ExecCommand(const std::string& cmd)
     {
@@ -93,53 +103,68 @@ namespace
         return std::min(MAX_LOG_RECORDS, params.get("limit", MAX_LOG_RECORDS).asUInt());
     }
 
-    struct TMakeJournalctlQueryResult
+    const char* GetData(sd_journal* j, const std::string& fieldName)
     {
-        std::string Query;
-        bool        ReverseOutput = false;
-        bool        ParseService = true;
+        const char* d;
+        size_t l;
+        int r = sd_journal_get_data(j, fieldName.c_str(), (const void **)&d, &l);
+        if (r == 0 && l > fieldName.size() + 1) {
+            return d + fieldName.size() + 1;
+        }
+        return nullptr;
+    }
+
+    struct TJournalctlFilterParams
+    {
+        bool                        Backward = true;
+        std::string                 Service;
+        uint32_t                    MaxEntries = MAX_LOG_RECORDS;
+        uint64_t                    From = 0;
+        std::string                 Cursor;
+        std::unique_ptr<std::regex> Pattern;
     };
 
-    TMakeJournalctlQueryResult MakeJournalctlQuery(const Json::Value& params)
+    TJournalctlFilterParams SetFilter(sd_journal* j, const Json::Value& params)
     {
-        TMakeJournalctlQueryResult res;
-        std::stringstream ss;
-        ss << "journalctl --no-pager -o export";
+        TJournalctlFilterParams filter;
         auto service = params.get("service", "").asString();
         if (!service.empty()) {
-            ss << " -u " << service;
-            res.ParseService = false;
+            SdCall(sd_journal_add_match(j, ("_SYSTEMD_UNIT=" + service).c_str(), 0), "Adding match failed: ");
+            filter.Service = service;
         }
-        ss << " -n " << GetMaxLogsEntries(params);
-        if (params.isMember("boot")) {
-            ss << " -b " << params["boot"].asString();
+
+        filter.MaxEntries = GetMaxLogsEntries(params);
+
+        auto boot = params.get("boot", "").asString();
+        if (!boot.empty()) {
+            sd_journal_add_match(j, ("_BOOT_ID=" + boot).c_str(), 0);
         }
-        if (params.isMember("time")) {
-            tm dt = {};
-            time_t t = params["time"].asInt64();
-            gmtime_r(&t, &dt);
-            ss << " -r -U " << "\"" << std::put_time(&dt, "%Y-%m-%d %H:%M:%S") << "\"";
-            res.Query = ss.str();
-            return res;
-        }
-        if (params.isMember("cursor")) {
-            auto& cursor = params["cursor"];
-            if (cursor.isMember("id") && cursor.isMember("direction")) {
-                ss << " --after-cursor=\"" << cursor["id"].asString() << "\"";
-                if (cursor["direction"].asString() == "backward") {
-                    ss << " -r";
-                } else {
-                    // Forward cursor queries return rows in ascending order, but we want a descending order
-                    res.ReverseOutput = true;
+
+        std::set<int> levels;
+        for (const auto& lv: params["levels"]) {
+            if (lv.isInt()) {
+                int l = lv.asInt();
+                if (l >= LOG_EMERG && l <= LOG_DEBUG && 0 == levels.count(l)) {
+                    levels.insert(l);
+                    SdCall(sd_journal_add_match(j, ("PRIORITY=" + std::to_string(l)).c_str(), 0), "Adding match failed: ");
                 }
-                res.Query = ss.str();
-                return res;
             }
         }
-        // We can't use -r option as journalctl has a bug not returning all requested rows
-        res.Query = ss.str();
-        res.ReverseOutput = true;
-        return res;
+
+        if (params.isMember("time")) {
+            filter.From = params["time"].asInt64() * 1000000;
+        }
+
+        if (params.isMember("cursor")) {
+            auto& cursor = params["cursor"];
+            filter.Cursor = cursor.get("id", "").asString();
+            filter.Backward = (cursor.get("direction", "backward").asString() == "backward");
+        }
+
+        if (params.isMember("pattern")) {
+            filter.Pattern = std::make_unique<std::regex>(params["pattern"].asString());
+        }
+        return filter;
     }
 
     Json::Value GetDmesgLogs()
@@ -160,33 +185,45 @@ namespace
         {"DEBUG:",   LOG_DEBUG  }
     };
 
-    void ParseMsg(const std::string& s, Json::Value& entry)
+    bool AddMsg(sd_journal* j, Json::Value& entry, const std::regex* pattern)
     {
-        entry["msg"] = s;
+        const char* d = GetData(j, "MESSAGE");
+        if (d == nullptr) {
+            return false;
+        }
+        if (pattern) {
+            if (!std::regex_search(d, *pattern)) {
+                return false;
+            }
+        }
+        entry["msg"] = d;
         if (!entry.isMember("level")) {
             std::any_of(LibWbMqttLogLevels.begin(), LibWbMqttLogLevels.end(), [&](const auto& p){
-                if (StringStartsWith(s, p.first)) {
+                if (StringStartsWith(d, p.first)) {
                     entry["level"] = p.second;
                     return true;
                 }
                 return false;
             });
         }
+        return true;
     }
 
-    void ParseTimestamp(const std::string& s, Json::Value& entry)
+    void AddTimestamp(sd_journal* j, Json::Value& entry)
     {
-        char* end;
-        auto ts = strtoull(s.c_str(), &end, 10);
-        if (s.c_str() != end) {
-            // __REALTIME_TIMESTAMP is in microseconds, convert it to milliseconds
-            entry["time"] = ts/1000;
+        uint64_t ts;
+        SdCall(sd_journal_get_realtime_usec(j, &ts), "Failed to read timestamp: ");
+        // __REALTIME_TIMESTAMP is in microseconds, convert it to milliseconds
+        entry["time"] = ts/1000;
+    }
+
+    void AddPriority(sd_journal* j, Json::Value& entry)
+    {
+        const char* d = GetData(j, "PRIORITY");
+        if (d == nullptr) {
+            return;
         }
-    }
-
-    void ParsePriority(const std::string& s, Json::Value& entry)
-    {
-        auto level = atoi(s.c_str());
+        auto level = atoi(d);
         // journald sets LOG_INFO priority for all unprefixed messages got fom stderr/stdout
         // They priority is set in ParseMsg according to a prefix.
         if (level != LOG_INFO && !entry.isMember("level")) {
@@ -194,13 +231,21 @@ namespace
         }
     }
 
-    void ParseCursor(const std::string& s, Json::Value& entry)
+    void AddCursor(sd_journal* j, Json::Value& entry)
     {
-        entry["cursor"] = s;
+        char* k = nullptr;
+        SdCall(sd_journal_get_cursor(j, &k), "Failed to get cursor: ");
+        entry["cursor"] = k;
+        free(k);
     }
 
-    void ParseService(const std::string& s, Json::Value& entry)
+    void AddService(sd_journal* j, Json::Value& entry)
     {
+        const char* d = GetData(j, "_SYSTEMD_UNIT");
+        if (d == nullptr) {
+            return;
+        }
+        std::string s(d);
         const std::string SERVICE_SUFFIX(".service");
         if (WBMQTT::StringHasSuffix(s, SERVICE_SUFFIX)) {
             entry["service"] = s.substr(0, s.length() - SERVICE_SUFFIX.length());
@@ -209,42 +254,55 @@ namespace
         }
     }
 
-    typedef std::function<void(const std::string&, Json::Value&)> TJournaldParamToJsonFn;
-    const std::vector<std::pair<std::string, TJournaldParamToJsonFn>> Prefixes = {
-        {"MESSAGE=",              ParseMsg      },
-        {"__REALTIME_TIMESTAMP=", ParseTimestamp},
-        {"PRIORITY=",             ParsePriority },
-        {"__CURSOR=",             ParseCursor   }
-    };
-
     Json::Value MakeJouralctlRequest(const Json::Value& params)
     {
-        auto query = MakeJournalctlQuery(params);
-        auto prefixes(Prefixes);
-        if (query.ParseService) {
-            prefixes.emplace_back("_SYSTEMD_UNIT=", ParseService);
-        }
-        LOG(Debug) << query.Query;
         Json::Value res(Json::arrayValue);
-        Json::Value entry;
-        for (const auto& s: ExecCommand(query.Query)) {
-            if (StringStartsWith(s, "__CURSOR=") && !entry.empty()) {
-                res.append(entry);
-                entry.clear();
-            }
-            std::any_of(prefixes.begin(), prefixes.end(), [&](const auto& p){
-                if (StringStartsWith(s, p.first)) {
-                    p.second(s.substr(p.first.length()), entry);
-                    return true;
+        sd_journal* j = nullptr;
+
+        try {
+            SdCall(sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY), "Failed to open journal: ");
+            std::unique_ptr<sd_journal, decltype(&sd_journal_close)> journalPtr(j, &sd_journal_close);
+
+            auto filter = SetFilter(j, params);
+
+            auto moveFn = filter.Backward ? sd_journal_previous : sd_journal_next;
+            if (!filter.Cursor.empty()) {
+                SdCall(sd_journal_seek_cursor(j, filter.Cursor.c_str()), "Failed to seek to tail of journal: ");
+                if (!filter.Backward) {
+                    moveFn(j); // Pass pointed by cursor record
                 }
-                return false;
-            });
-        }
-        if (!entry.empty()) {
-            res.append(entry);
-        }
-        if (query.ReverseOutput) {
-            std::reverse(res.begin(), res.end());
+            } else if (filter.From) {
+                SdCall(sd_journal_seek_realtime_usec(j, filter.From), "Failed to seek to tail of journal: ");
+            } else {
+                SdCall(sd_journal_seek_tail(j), "Failed to seek to tail of journal: ");
+            }
+
+            int r = moveFn(j);
+            while (r > 0 && filter.MaxEntries) {
+                Json::Value item;
+                if (AddMsg(j, item, filter.Pattern.get())) {
+                    AddTimestamp(j, item);
+                    AddCursor(j, item);
+                    AddPriority(j, item);
+                    if (filter.Service.empty()) {
+                        AddService(j, item);
+                    }
+                    res.append(item);
+                    --filter.MaxEntries;
+                }
+                r = moveFn(j);
+            }
+
+            if (r < 0) {
+                LOG(Error) << "Failed to get next journal entry: " << strerror(-r);
+            }
+
+            // Forward queries return rows in ascending order, but we want a descending order
+            if (!filter.Backward) {
+                std::reverse(res.begin(), res.end());
+            }
+        } catch (const std::exception& e) {
+            LOG(Error) << e.what();
         }
         return res;
     }
