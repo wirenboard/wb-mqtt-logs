@@ -258,51 +258,46 @@ namespace
     {
         Json::Value res(Json::arrayValue);
         sd_journal* j = nullptr;
+        SdThrowError(sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY), "Failed to open journal");
+        std::unique_ptr<sd_journal, decltype(&sd_journal_close)> journalPtr(j, &sd_journal_close);
 
-        try {
-            SdThrowError(sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY), "Failed to open journal");
-            std::unique_ptr<sd_journal, decltype(&sd_journal_close)> journalPtr(j, &sd_journal_close);
+        auto filter = SetFilter(j, params);
 
-            auto filter = SetFilter(j, params);
-
-            auto moveFn = filter.Backward ? sd_journal_previous : sd_journal_next;
-            if (!filter.Cursor.empty()) {
-                SdThrowError(sd_journal_seek_cursor(j, filter.Cursor.c_str()), "Failed to seek to tail of journal");
-                if (!filter.Backward) {
-                    moveFn(j); // Pass pointed by cursor record
-                }
-            } else if (filter.From) {
-                SdThrowError(sd_journal_seek_realtime_usec(j, filter.From), "Failed to seek to tail of journal");
-            } else {
-                SdThrowError(sd_journal_seek_tail(j), "Failed to seek to tail of journal");
-            }
-
-            int r = moveFn(j);
-            while (r > 0 && filter.MaxEntries) {
-                Json::Value item;
-                if (AddMsg(j, item, filter.Pattern.get())) {
-                    AddTimestamp(j, item);
-                    AddCursor(j, item);
-                    AddPriority(j, item);
-                    if (filter.Service.empty()) {
-                        AddService(j, item);
-                    }
-                    res.append(item);
-                    --filter.MaxEntries;
-                }
-                r = moveFn(j);
-            }
-
-            if (r < 0) {
-                LOG(Error) << "Failed to get next journal entry: " << strerror(-r);
-            }
-
-            // Forward queries return rows in ascending order, but we want a descending order
+        auto moveFn = filter.Backward ? sd_journal_previous : sd_journal_next;
+        if (!filter.Cursor.empty()) {
+            SdThrowError(sd_journal_seek_cursor(j, filter.Cursor.c_str()), "Failed to seek to tail of journal");
             if (!filter.Backward) {
-                std::reverse(res.begin(), res.end());
+                moveFn(j); // Pass pointed by cursor record
             }
-        } catch (const std::exception& e) {
-            LOG(Error) << e.what();
+        } else if (filter.From) {
+            SdThrowError(sd_journal_seek_realtime_usec(j, filter.From), "Failed to seek to tail of journal");
+        } else {
+            SdThrowError(sd_journal_seek_tail(j), "Failed to seek to tail of journal");
+        }
+
+        int r = moveFn(j);
+        while (r > 0 && filter.MaxEntries) {
+            Json::Value item;
+            if (AddMsg(j, item, filter.Pattern.get())) {
+                AddTimestamp(j, item);
+                AddCursor(j, item);
+                AddPriority(j, item);
+                if (filter.Service.empty()) {
+                    AddService(j, item);
+                }
+                res.append(item);
+                --filter.MaxEntries;
+            }
+            r = moveFn(j);
+        }
+
+        if (r < 0) {
+            LOG(Error) << "Failed to get next journal entry: " << strerror(-r);
+        }
+
+        // Forward queries return rows in ascending order, but we want a descending order
+        if (!filter.Backward) {
+            std::reverse(res.begin(), res.end());
         }
         return res;
     }
@@ -355,8 +350,7 @@ Json::Value TMQTTJournaldGateway::Load(const Json::Value& params)
     try {
         return GetLogs(params);
     } catch (const std::exception& e) {
-        Json::Value res(Json::arrayValue);
-        res.append(e.what());
-        return res;
+        LOG(Error) << e.what();
+        throw;
     }
 }
