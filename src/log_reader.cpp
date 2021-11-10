@@ -21,10 +21,10 @@ namespace
     const auto     DMESG_SERVICE   = "dmesg";
     const uint32_t MAX_LOG_RECORDS = 100;
 
-    void SdCall(int res, const std::string& msg)
+    void SdThrowError(int res, const std::string& msg)
     {
         if (res < 0) {
-            throw std::runtime_error(std::string(msg) + strerror(-res));
+            throw std::runtime_error(std::string(msg) + ": " + strerror(-res));
         }
     }
 
@@ -129,7 +129,7 @@ namespace
         TJournalctlFilterParams filter;
         auto service = params.get("service", "").asString();
         if (!service.empty()) {
-            SdCall(sd_journal_add_match(j, ("_SYSTEMD_UNIT=" + service).c_str(), 0), "Adding match failed: ");
+            SdThrowError(sd_journal_add_match(j, ("_SYSTEMD_UNIT=" + service).c_str(), 0), "Adding match failed");
             filter.Service = service;
         }
 
@@ -146,7 +146,7 @@ namespace
                 int l = lv.asInt();
                 if (l >= LOG_EMERG && l <= LOG_DEBUG && 0 == levels.count(l)) {
                     levels.insert(l);
-                    SdCall(sd_journal_add_match(j, ("PRIORITY=" + std::to_string(l)).c_str(), 0), "Adding match failed: ");
+                    SdThrowError(sd_journal_add_match(j, ("PRIORITY=" + std::to_string(l)).c_str(), 0), "Adding match failed");
                 }
             }
         }
@@ -212,7 +212,7 @@ namespace
     void AddTimestamp(sd_journal* j, Json::Value& entry)
     {
         uint64_t ts;
-        SdCall(sd_journal_get_realtime_usec(j, &ts), "Failed to read timestamp: ");
+        SdThrowError(sd_journal_get_realtime_usec(j, &ts), "Failed to read timestamp");
         // __REALTIME_TIMESTAMP is in microseconds, convert it to milliseconds
         entry["time"] = ts/1000;
     }
@@ -234,7 +234,7 @@ namespace
     void AddCursor(sd_journal* j, Json::Value& entry)
     {
         char* k = nullptr;
-        SdCall(sd_journal_get_cursor(j, &k), "Failed to get cursor: ");
+        SdThrowError(sd_journal_get_cursor(j, &k), "Failed to get cursor");
         entry["cursor"] = k;
         free(k);
     }
@@ -260,21 +260,21 @@ namespace
         sd_journal* j = nullptr;
 
         try {
-            SdCall(sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY), "Failed to open journal: ");
+            SdThrowError(sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY), "Failed to open journal");
             std::unique_ptr<sd_journal, decltype(&sd_journal_close)> journalPtr(j, &sd_journal_close);
 
             auto filter = SetFilter(j, params);
 
             auto moveFn = filter.Backward ? sd_journal_previous : sd_journal_next;
             if (!filter.Cursor.empty()) {
-                SdCall(sd_journal_seek_cursor(j, filter.Cursor.c_str()), "Failed to seek to tail of journal: ");
+                SdThrowError(sd_journal_seek_cursor(j, filter.Cursor.c_str()), "Failed to seek to tail of journal");
                 if (!filter.Backward) {
                     moveFn(j); // Pass pointed by cursor record
                 }
             } else if (filter.From) {
-                SdCall(sd_journal_seek_realtime_usec(j, filter.From), "Failed to seek to tail of journal: ");
+                SdThrowError(sd_journal_seek_realtime_usec(j, filter.From), "Failed to seek to tail of journal");
             } else {
-                SdCall(sd_journal_seek_tail(j), "Failed to seek to tail of journal: ");
+                SdThrowError(sd_journal_seek_tail(j), "Failed to seek to tail of journal");
             }
 
             int r = moveFn(j);
