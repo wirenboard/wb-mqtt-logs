@@ -151,13 +151,16 @@ int main(int argc, char* argv[])
 
     try {
         auto mqttClient(WBMQTT::NewMosquittoMqttClient(mqttConfig));
-        auto rpcServer(WBMQTT::NewMqttRpcServer(mqttClient, "wb_logs"));
-        TMQTTJournaldGateway gw(mqttClient, rpcServer);
+        auto rpcServer1(WBMQTT::NewMqttRpcServer(mqttClient, "wb_logs"));
+        auto rpcServer2(WBMQTT::NewMqttRpcServer(mqttClient, "wb_logs"));
+        TMQTTJournaldGateway gw(mqttClient, rpcServer1, rpcServer2);
         initialized.Complete();
         mqttClient->Start();
-        rpcServer->Start();
+        rpcServer1->Start();
+        rpcServer2->Start();
         WBMQTT::SignalHandling::Wait();
-        rpcServer->Stop();
+        rpcServer2->Stop();
+        rpcServer1->Stop();
         mqttClient->Stop();
     } catch (const std::exception& e) {
         Error.Log() << e.what();

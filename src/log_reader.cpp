@@ -254,7 +254,7 @@ namespace
         }
     }
 
-    Json::Value MakeJouralctlRequest(const Json::Value& params)
+    Json::Value MakeJouralctlRequest(const Json::Value& params, std::atomic_bool& cancelLoading)
     {
         Json::Value res(Json::arrayValue);
         sd_journal* j = nullptr;
@@ -276,7 +276,7 @@ namespace
         }
 
         int r = moveFn(j);
-        while (r > 0 && filter.MaxEntries) {
+        while (r > 0 && filter.MaxEntries && !cancelLoading) {
             Json::Value item;
             if (AddMsg(j, item, filter.Pattern.get())) {
                 AddTimestamp(j, item);
@@ -302,9 +302,9 @@ namespace
         return res;
     }
 
-    Json::Value GetJouralctlLogs(const Json::Value& params)
+    Json::Value GetJouralctlLogs(const Json::Value& params, std::atomic_bool& cancelLoading)
     {
-        Json::Value res(MakeJouralctlRequest(params));
+        Json::Value res(MakeJouralctlRequest(params, cancelLoading));
         if (res.size() > 2) {
             // cursor is needed only for the first and the last record
             std::for_each(++res.begin(), --res.end(), [](auto& item) { item.removeMember("cursor"); });
@@ -312,22 +312,27 @@ namespace
         return res;
     }
 
-    Json::Value GetLogs(const Json::Value& params)
+    Json::Value GetLogs(const Json::Value& params, std::atomic_bool& cancelLoading)
     {
         if (params.get("service", "").asString() == DMESG_SERVICE) {
             return GetDmesgLogs();
         }
-        return GetJouralctlLogs(params);
+        return GetJouralctlLogs(params, cancelLoading);
     }
 }
 
-TMQTTJournaldGateway::TMQTTJournaldGateway(PMqttClient mqttClient, PMqttRpcServer rpcServer)
+TMQTTJournaldGateway::TMQTTJournaldGateway(PMqttClient mqttClient,
+                                           PMqttRpcServer requestsRpcServer,
+                                           PMqttRpcServer cancelRequestsRpcServer)
     : MqttClient(mqttClient),
-      RpcServer(rpcServer),
-      Boots(GetBoots())
+      RequestsRpcServer(requestsRpcServer),
+      CancelRequestsRpcServer(cancelRequestsRpcServer),
+      Boots(GetBoots()),
+      CancelLoading(false)
 {
-    RpcServer->RegisterMethod("logs", "List", std::bind(&TMQTTJournaldGateway::List, this, std::placeholders::_1));
-    RpcServer->RegisterMethod("logs", "Load", std::bind(&TMQTTJournaldGateway::Load, this, std::placeholders::_1));
+    RequestsRpcServer->RegisterMethod("logs", "List", std::bind(&TMQTTJournaldGateway::List, this, std::placeholders::_1));
+    RequestsRpcServer->RegisterMethod("logs", "Load", std::bind(&TMQTTJournaldGateway::Load, this, std::placeholders::_1));
+    CancelRequestsRpcServer->RegisterMethod("logs", "CancelLoad", std::bind(&TMQTTJournaldGateway::CancelLoad, this, std::placeholders::_1));
 }
 
 Json::Value TMQTTJournaldGateway::List(const Json::Value& /*params*/)
@@ -348,9 +353,17 @@ Json::Value TMQTTJournaldGateway::Load(const Json::Value& params)
 {
     LOG(Debug) << "Run RPC Load()";
     try {
-        return GetLogs(params);
+        CancelLoading = false;
+        return GetLogs(params, CancelLoading);
     } catch (const std::exception& e) {
         LOG(Error) << e.what();
         throw;
     }
+}
+
+Json::Value TMQTTJournaldGateway::CancelLoad(const Json::Value& params)
+{
+    LOG(Debug) << "Run RPC CancelLoad()";
+    CancelLoading = true;
+    return Json::Value();
 }
