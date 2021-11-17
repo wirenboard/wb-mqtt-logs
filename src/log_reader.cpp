@@ -4,7 +4,7 @@
 
 #include <algorithm>
 #include <set>
-#include <regex>
+#include <unicode/regex.h>
 
 #include <wblib/exceptions.h>
 #include <wblib/json_utils.h>
@@ -121,7 +121,9 @@ namespace
         uint32_t                    MaxEntries = MAX_LOG_RECORDS;
         uint64_t                    From = 0;
         std::string                 Cursor;
-        std::unique_ptr<std::regex> Pattern;
+        UnicodeString               Pattern;
+        bool                        CaseSensitive = true;
+        bool                        RegEx = false;
     };
 
     TJournalctlFilterParams SetFilter(sd_journal* j, const Json::Value& params)
@@ -161,9 +163,10 @@ namespace
             filter.Backward = (cursor.get("direction", "backward").asString() == "backward");
         }
 
-        if (params.isMember("pattern")) {
-            filter.Pattern = std::make_unique<std::regex>(params["pattern"].asString());
-        }
+        filter.Pattern = UnicodeString::fromUTF8(params.get("pattern", "").asString());
+        filter.CaseSensitive = params.get("case-sensitive", true).asBool();
+        filter.RegEx = params.get("regex", false).asBool();
+
         return filter;
     }
 
@@ -185,15 +188,45 @@ namespace
         {"DEBUG:",   LOG_DEBUG  }
     };
 
-    bool AddMsg(sd_journal* j, Json::Value& entry, const std::regex* pattern)
+    bool HasSubstring(const UnicodeString& msg, const UnicodeString& pattern, bool caseSensitive)
+    {
+        if (caseSensitive) {
+            return (msg.indexOf(pattern) >= 0);
+        }
+        return (UnicodeString(msg).foldCase().indexOf(UnicodeString(pattern).foldCase()) >= 0);
+    }
+
+    bool MatchesRegex(const UnicodeString& msg, const UnicodeString& pattern, bool caseSensitive)
+    {
+        UErrorCode status = U_ZERO_ERROR;
+        RegexMatcher m(pattern, (caseSensitive ? 0 : UREGEX_CASE_INSENSITIVE), status);
+        if (U_FAILURE(status)) {
+            throw std::runtime_error("Could not create a RegexMatcher object");
+        }
+        m.reset(msg);
+        bool ok = m.find(status);
+        if (U_FAILURE(status)) {
+            throw std::runtime_error("Error searching for pattern");
+        }
+        return ok;
+    }
+
+    bool AddMsg(sd_journal* j, Json::Value& entry, const UnicodeString& pattern, bool caseSensitive, bool regEx)
     {
         const char* d = GetData(j, "MESSAGE");
         if (d == nullptr) {
             return false;
         }
-        if (pattern) {
-            if (!std::regex_search(d, *pattern)) {
-                return false;
+        if (!pattern.isEmpty()) {
+            auto msg = UnicodeString::fromUTF8(d);
+            if (regEx) {
+                if (!MatchesRegex(msg, pattern, caseSensitive)) {
+                    return false;
+                }
+            } else {
+                if (!HasSubstring(msg, pattern, caseSensitive)) {
+                    return false;
+                }
             }
         }
         entry["msg"] = d;
@@ -278,7 +311,7 @@ namespace
         int r = moveFn(j);
         while (r > 0 && filter.MaxEntries && !cancelLoading) {
             Json::Value item;
-            if (AddMsg(j, item, filter.Pattern.get())) {
+            if (AddMsg(j, item, filter.Pattern, filter.CaseSensitive, filter.RegEx)) {
                 AddTimestamp(j, item);
                 AddCursor(j, item);
                 AddPriority(j, item);
