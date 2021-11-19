@@ -119,7 +119,7 @@ namespace
         bool                        Backward = true;
         std::string                 Service;
         uint32_t                    MaxEntries = MAX_LOG_RECORDS;
-        uint64_t                    From = 0;
+        std::chrono::microseconds   From;
         std::string                 Cursor;
         UnicodeString               Pattern;
         bool                        CaseSensitive = true;
@@ -154,7 +154,7 @@ namespace
         }
 
         if (params.isMember("time")) {
-            filter.From = params["time"].asInt64() * 1000000;
+            filter.From = std::chrono::microseconds(params["time"].asInt64() * 1000000);
         }
 
         if (params.isMember("cursor")) {
@@ -302,8 +302,8 @@ namespace
             if (!filter.Backward) {
                 moveFn(j); // Pass pointed by cursor record
             }
-        } else if (filter.From) {
-            SdThrowError(sd_journal_seek_realtime_usec(j, filter.From), "Failed to seek to tail of journal");
+        } else if (filter.From.count() > 0) {
+            SdThrowError(sd_journal_seek_realtime_usec(j, filter.From.count()), "Failed to seek to tail of journal");
         } else {
             SdThrowError(sd_journal_seek_tail(j), "Failed to seek to tail of journal");
         }
