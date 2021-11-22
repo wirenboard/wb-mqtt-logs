@@ -3,11 +3,14 @@
 #include "log.h"
 
 #include <algorithm>
+#include <set>
+#include <unicode/regex.h>
 
 #include <wblib/exceptions.h>
 #include <wblib/json_utils.h>
 #include <wblib/mqtt.h>
 #include <syslog.h>
+#include <systemd/sd-journal.h>
 
 using namespace WBMQTT;
 
@@ -17,6 +20,13 @@ namespace
 {
     const auto     DMESG_SERVICE   = "dmesg";
     const uint32_t MAX_LOG_RECORDS = 100;
+
+    void SdThrowError(int res, const std::string& msg)
+    {
+        if (res < 0) {
+            throw std::runtime_error(std::string(msg) + ": " + strerror(-res));
+        }
+    }
 
     std::vector<std::string> ExecCommand(const std::string& cmd)
     {
@@ -93,53 +103,71 @@ namespace
         return std::min(MAX_LOG_RECORDS, params.get("limit", MAX_LOG_RECORDS).asUInt());
     }
 
-    struct TMakeJournalctlQueryResult
+    const char* GetData(sd_journal* j, const std::string& fieldName)
     {
-        std::string Query;
-        bool        ReverseOutput = false;
-        bool        ParseService = true;
+        const char* d;
+        size_t l;
+        int r = sd_journal_get_data(j, fieldName.c_str(), (const void **)&d, &l);
+        if (r == 0 && l > fieldName.size() + 1) {
+            return d + fieldName.size() + 1;
+        }
+        return nullptr;
+    }
+
+    struct TJournalctlFilterParams
+    {
+        bool                        Backward = true;
+        std::string                 Service;
+        uint32_t                    MaxEntries = MAX_LOG_RECORDS;
+        std::chrono::microseconds   From;
+        std::string                 Cursor;
+        UnicodeString               Pattern;
+        bool                        CaseSensitive = true;
+        bool                        RegEx = false;
     };
 
-    TMakeJournalctlQueryResult MakeJournalctlQuery(const Json::Value& params)
+    TJournalctlFilterParams SetFilter(sd_journal* j, const Json::Value& params)
     {
-        TMakeJournalctlQueryResult res;
-        std::stringstream ss;
-        ss << "journalctl --no-pager -o export";
+        TJournalctlFilterParams filter;
         auto service = params.get("service", "").asString();
         if (!service.empty()) {
-            ss << " -u " << service;
-            res.ParseService = false;
+            SdThrowError(sd_journal_add_match(j, ("_SYSTEMD_UNIT=" + service).c_str(), 0), "Adding match failed");
+            filter.Service = service;
         }
-        ss << " -n " << GetMaxLogsEntries(params);
-        if (params.isMember("boot")) {
-            ss << " -b " << params["boot"].asString();
+
+        filter.MaxEntries = GetMaxLogsEntries(params);
+
+        auto boot = params.get("boot", "").asString();
+        if (!boot.empty()) {
+            sd_journal_add_match(j, ("_BOOT_ID=" + boot).c_str(), 0);
         }
-        if (params.isMember("time")) {
-            tm dt = {};
-            time_t t = params["time"].asInt64();
-            gmtime_r(&t, &dt);
-            ss << " -r -U " << "\"" << std::put_time(&dt, "%Y-%m-%d %H:%M:%S") << "\"";
-            res.Query = ss.str();
-            return res;
-        }
-        if (params.isMember("cursor")) {
-            auto& cursor = params["cursor"];
-            if (cursor.isMember("id") && cursor.isMember("direction")) {
-                ss << " --after-cursor=\"" << cursor["id"].asString() << "\"";
-                if (cursor["direction"].asString() == "backward") {
-                    ss << " -r";
-                } else {
-                    // Forward cursor queries return rows in ascending order, but we want a descending order
-                    res.ReverseOutput = true;
+
+        std::set<int> levels;
+        for (const auto& lv: params["levels"]) {
+            if (lv.isInt()) {
+                int l = lv.asInt();
+                if (l >= LOG_EMERG && l <= LOG_DEBUG && 0 == levels.count(l)) {
+                    levels.insert(l);
+                    SdThrowError(sd_journal_add_match(j, ("PRIORITY=" + std::to_string(l)).c_str(), 0), "Adding match failed");
                 }
-                res.Query = ss.str();
-                return res;
             }
         }
-        // We can't use -r option as journalctl has a bug not returning all requested rows
-        res.Query = ss.str();
-        res.ReverseOutput = true;
-        return res;
+
+        if (params.isMember("time")) {
+            filter.From = std::chrono::microseconds(params["time"].asInt64() * 1000000);
+        }
+
+        if (params.isMember("cursor")) {
+            auto& cursor = params["cursor"];
+            filter.Cursor = cursor.get("id", "").asString();
+            filter.Backward = (cursor.get("direction", "backward").asString() == "backward");
+        }
+
+        filter.Pattern = UnicodeString::fromUTF8(params.get("pattern", "").asString());
+        filter.CaseSensitive = params.get("case-sensitive", true).asBool();
+        filter.RegEx = params.get("regex", false).asBool();
+
+        return filter;
     }
 
     Json::Value GetDmesgLogs()
@@ -160,33 +188,75 @@ namespace
         {"DEBUG:",   LOG_DEBUG  }
     };
 
-    void ParseMsg(const std::string& s, Json::Value& entry)
+    bool HasSubstring(const UnicodeString& msg, const UnicodeString& pattern, bool caseSensitive)
     {
-        entry["msg"] = s;
+        if (caseSensitive) {
+            return (msg.indexOf(pattern) >= 0);
+        }
+        return (UnicodeString(msg).foldCase().indexOf(UnicodeString(pattern).foldCase()) >= 0);
+    }
+
+    bool MatchesRegex(const UnicodeString& msg, const UnicodeString& pattern, bool caseSensitive)
+    {
+        UErrorCode status = U_ZERO_ERROR;
+        RegexMatcher m(pattern, (caseSensitive ? 0 : UREGEX_CASE_INSENSITIVE), status);
+        if (U_FAILURE(status)) {
+            throw std::runtime_error("Could not create a RegexMatcher object");
+        }
+        m.reset(msg);
+        bool ok = m.find(status);
+        if (U_FAILURE(status)) {
+            throw std::runtime_error("Error searching for pattern");
+        }
+        return ok;
+    }
+
+    bool AddMsg(sd_journal* j, Json::Value& entry, const UnicodeString& pattern, bool caseSensitive, bool regEx)
+    {
+        const char* d = GetData(j, "MESSAGE");
+        if (d == nullptr) {
+            return false;
+        }
+        if (!pattern.isEmpty()) {
+            auto msg = UnicodeString::fromUTF8(d);
+            if (regEx) {
+                if (!MatchesRegex(msg, pattern, caseSensitive)) {
+                    return false;
+                }
+            } else {
+                if (!HasSubstring(msg, pattern, caseSensitive)) {
+                    return false;
+                }
+            }
+        }
+        entry["msg"] = d;
         if (!entry.isMember("level")) {
             std::any_of(LibWbMqttLogLevels.begin(), LibWbMqttLogLevels.end(), [&](const auto& p){
-                if (StringStartsWith(s, p.first)) {
+                if (StringStartsWith(d, p.first)) {
                     entry["level"] = p.second;
                     return true;
                 }
                 return false;
             });
         }
+        return true;
     }
 
-    void ParseTimestamp(const std::string& s, Json::Value& entry)
+    void AddTimestamp(sd_journal* j, Json::Value& entry)
     {
-        char* end;
-        auto ts = strtoull(s.c_str(), &end, 10);
-        if (s.c_str() != end) {
-            // __REALTIME_TIMESTAMP is in microseconds, convert it to milliseconds
-            entry["time"] = ts/1000;
+        uint64_t ts;
+        SdThrowError(sd_journal_get_realtime_usec(j, &ts), "Failed to read timestamp");
+        // __REALTIME_TIMESTAMP is in microseconds, convert it to milliseconds
+        entry["time"] = ts/1000;
+    }
+
+    void AddPriority(sd_journal* j, Json::Value& entry)
+    {
+        const char* d = GetData(j, "PRIORITY");
+        if (d == nullptr) {
+            return;
         }
-    }
-
-    void ParsePriority(const std::string& s, Json::Value& entry)
-    {
-        auto level = atoi(s.c_str());
+        auto level = atoi(d);
         // journald sets LOG_INFO priority for all unprefixed messages got fom stderr/stdout
         // They priority is set in ParseMsg according to a prefix.
         if (level != LOG_INFO && !entry.isMember("level")) {
@@ -194,13 +264,21 @@ namespace
         }
     }
 
-    void ParseCursor(const std::string& s, Json::Value& entry)
+    void AddCursor(sd_journal* j, Json::Value& entry)
     {
-        entry["cursor"] = s;
+        char* k = nullptr;
+        SdThrowError(sd_journal_get_cursor(j, &k), "Failed to get cursor");
+        entry["cursor"] = k;
+        free(k);
     }
 
-    void ParseService(const std::string& s, Json::Value& entry)
+    void AddService(sd_journal* j, Json::Value& entry)
     {
+        const char* d = GetData(j, "_SYSTEMD_UNIT");
+        if (d == nullptr) {
+            return;
+        }
+        std::string s(d);
         const std::string SERVICE_SUFFIX(".service");
         if (WBMQTT::StringHasSuffix(s, SERVICE_SUFFIX)) {
             entry["service"] = s.substr(0, s.length() - SERVICE_SUFFIX.length());
@@ -209,49 +287,57 @@ namespace
         }
     }
 
-    typedef std::function<void(const std::string&, Json::Value&)> TJournaldParamToJsonFn;
-    const std::vector<std::pair<std::string, TJournaldParamToJsonFn>> Prefixes = {
-        {"MESSAGE=",              ParseMsg      },
-        {"__REALTIME_TIMESTAMP=", ParseTimestamp},
-        {"PRIORITY=",             ParsePriority },
-        {"__CURSOR=",             ParseCursor   }
-    };
-
-    Json::Value MakeJouralctlRequest(const Json::Value& params)
+    Json::Value MakeJouralctlRequest(const Json::Value& params, std::atomic_bool& cancelLoading)
     {
-        auto query = MakeJournalctlQuery(params);
-        auto prefixes(Prefixes);
-        if (query.ParseService) {
-            prefixes.emplace_back("_SYSTEMD_UNIT=", ParseService);
-        }
-        LOG(Debug) << query.Query;
         Json::Value res(Json::arrayValue);
-        Json::Value entry;
-        for (const auto& s: ExecCommand(query.Query)) {
-            if (StringStartsWith(s, "__CURSOR=") && !entry.empty()) {
-                res.append(entry);
-                entry.clear();
+        sd_journal* j = nullptr;
+        SdThrowError(sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY), "Failed to open journal");
+        std::unique_ptr<sd_journal, decltype(&sd_journal_close)> journalPtr(j, &sd_journal_close);
+
+        auto filter = SetFilter(j, params);
+
+        auto moveFn = filter.Backward ? sd_journal_previous : sd_journal_next;
+        if (!filter.Cursor.empty()) {
+            SdThrowError(sd_journal_seek_cursor(j, filter.Cursor.c_str()), "Failed to seek to tail of journal");
+            if (!filter.Backward) {
+                moveFn(j); // Pass pointed by cursor record
             }
-            std::any_of(prefixes.begin(), prefixes.end(), [&](const auto& p){
-                if (StringStartsWith(s, p.first)) {
-                    p.second(s.substr(p.first.length()), entry);
-                    return true;
+        } else if (filter.From.count() > 0) {
+            SdThrowError(sd_journal_seek_realtime_usec(j, filter.From.count()), "Failed to seek to tail of journal");
+        } else {
+            SdThrowError(sd_journal_seek_tail(j), "Failed to seek to tail of journal");
+        }
+
+        int r = moveFn(j);
+        while (r > 0 && filter.MaxEntries && !cancelLoading) {
+            Json::Value item;
+            if (AddMsg(j, item, filter.Pattern, filter.CaseSensitive, filter.RegEx)) {
+                AddTimestamp(j, item);
+                AddCursor(j, item);
+                AddPriority(j, item);
+                if (filter.Service.empty()) {
+                    AddService(j, item);
                 }
-                return false;
-            });
+                res.append(item);
+                --filter.MaxEntries;
+            }
+            r = moveFn(j);
         }
-        if (!entry.empty()) {
-            res.append(entry);
+
+        if (r < 0) {
+            LOG(Error) << "Failed to get next journal entry: " << strerror(-r);
         }
-        if (query.ReverseOutput) {
+
+        // Forward queries return rows in ascending order, but we want a descending order
+        if (!filter.Backward) {
             std::reverse(res.begin(), res.end());
         }
         return res;
     }
 
-    Json::Value GetJouralctlLogs(const Json::Value& params)
+    Json::Value GetJouralctlLogs(const Json::Value& params, std::atomic_bool& cancelLoading)
     {
-        Json::Value res(MakeJouralctlRequest(params));
+        Json::Value res(MakeJouralctlRequest(params, cancelLoading));
         if (res.size() > 2) {
             // cursor is needed only for the first and the last record
             std::for_each(++res.begin(), --res.end(), [](auto& item) { item.removeMember("cursor"); });
@@ -259,22 +345,27 @@ namespace
         return res;
     }
 
-    Json::Value GetLogs(const Json::Value& params)
+    Json::Value GetLogs(const Json::Value& params, std::atomic_bool& cancelLoading)
     {
         if (params.get("service", "").asString() == DMESG_SERVICE) {
             return GetDmesgLogs();
         }
-        return GetJouralctlLogs(params);
+        return GetJouralctlLogs(params, cancelLoading);
     }
 }
 
-TMQTTJournaldGateway::TMQTTJournaldGateway(PMqttClient mqttClient, PMqttRpcServer rpcServer)
+TMQTTJournaldGateway::TMQTTJournaldGateway(PMqttClient mqttClient,
+                                           PMqttRpcServer requestsRpcServer,
+                                           PMqttRpcServer cancelRequestsRpcServer)
     : MqttClient(mqttClient),
-      RpcServer(rpcServer),
-      Boots(GetBoots())
+      RequestsRpcServer(requestsRpcServer),
+      CancelRequestsRpcServer(cancelRequestsRpcServer),
+      Boots(GetBoots()),
+      CancelLoading(false)
 {
-    RpcServer->RegisterMethod("logs", "List", std::bind(&TMQTTJournaldGateway::List, this, std::placeholders::_1));
-    RpcServer->RegisterMethod("logs", "Load", std::bind(&TMQTTJournaldGateway::Load, this, std::placeholders::_1));
+    RequestsRpcServer->RegisterMethod("logs", "List", std::bind(&TMQTTJournaldGateway::List, this, std::placeholders::_1));
+    RequestsRpcServer->RegisterMethod("logs", "Load", std::bind(&TMQTTJournaldGateway::Load, this, std::placeholders::_1));
+    CancelRequestsRpcServer->RegisterMethod("logs", "CancelLoad", std::bind(&TMQTTJournaldGateway::CancelLoad, this, std::placeholders::_1));
 }
 
 Json::Value TMQTTJournaldGateway::List(const Json::Value& /*params*/)
@@ -295,10 +386,17 @@ Json::Value TMQTTJournaldGateway::Load(const Json::Value& params)
 {
     LOG(Debug) << "Run RPC Load()";
     try {
-        return GetLogs(params);
+        CancelLoading = false;
+        return GetLogs(params, CancelLoading);
     } catch (const std::exception& e) {
-        Json::Value res(Json::arrayValue);
-        res.append(e.what());
-        return res;
+        LOG(Error) << e.what();
+        throw;
     }
+}
+
+Json::Value TMQTTJournaldGateway::CancelLoad(const Json::Value& params)
+{
+    LOG(Debug) << "Run RPC CancelLoad()";
+    CancelLoading = true;
+    return Json::Value();
 }

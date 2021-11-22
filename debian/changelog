@@ -1,3 +1,9 @@
+wb-mqtt-logs (1.2.0) stable; urgency=medium
+
+  * Syslog levels range and message pattern are added to "Load" request
+
+ -- Petr Krasnoshchekov <petr.krasnoshchekov@wirenboard.ru>  Mon, 01 Nov 2021 12:14:27 +0500
+
 wb-mqtt-logs (1.1.3) stable; urgency=medium
 
   * More accurate journalctl records parsing
