@@ -14,9 +14,10 @@ private:
     Json::Value List(const Json::Value& params);
     Json::Value CancelLoad(const Json::Value& params);
 
-    WBMQTT::PMqttClient    MqttClient;
-    WBMQTT::PMqttRpcServer RequestsRpcServer;
-    WBMQTT::PMqttRpcServer CancelRequestsRpcServer;
-    Json::Value            Boots;
-    std::atomic_bool       CancelLoading;
+    WBMQTT::PMqttClient                   MqttClient;
+    WBMQTT::PMqttRpcServer                RequestsRpcServer;
+    WBMQTT::PMqttRpcServer                CancelRequestsRpcServer;
+    Json::Value                           Boots;
+    std::atomic_bool                      CancelLoading;
+    std::chrono::system_clock::time_point BootTime;
 };
