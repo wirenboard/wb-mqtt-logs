@@ -11,6 +11,7 @@
 #include <wblib/mqtt.h>
 #include <syslog.h>
 #include <systemd/sd-journal.h>
+#include <sys/sysinfo.h>
 
 using namespace WBMQTT;
 
@@ -170,12 +171,23 @@ namespace
         return filter;
     }
 
-    Json::Value GetDmesgLogs()
+    Json::Value GetDmesgLogs(std::chrono::system_clock::time_point bootTime)
     {
         Json::Value res(Json::arrayValue);
         for (const auto& s: ExecCommand("dmesg --color=never")) {
             Json::Value entry;
-            entry["msg"] = s;
+            size_t p = 0;
+            if (s[0] == '[') {
+                auto sec = strtod(s.c_str() + 1, nullptr);
+                auto t = bootTime + std::chrono::milliseconds(static_cast<std::chrono::milliseconds::rep>(sec * 1000));
+                entry["time"] = std::chrono::duration_cast<std::chrono::milliseconds>(t.time_since_epoch()).count();
+                p = s.find(']');
+                p = (p == std::string::npos) ? 0 : p + 1;
+                if (s[p] == ' ') {
+                    ++p;
+                }
+            }
+            entry["msg"] = s.substr(p);
             res.append(entry);
         }
         return res;
@@ -345,12 +357,24 @@ namespace
         return res;
     }
 
-    Json::Value GetLogs(const Json::Value& params, std::atomic_bool& cancelLoading)
+    Json::Value GetLogs(const Json::Value&                    params,
+                        std::atomic_bool&                     cancelLoading,
+                        std::chrono::system_clock::time_point bootTime)
     {
         if (params.get("service", "").asString() == DMESG_SERVICE) {
-            return GetDmesgLogs();
+            return GetDmesgLogs(bootTime);
         }
         return GetJouralctlLogs(params, cancelLoading);
+    }
+
+    std::chrono::system_clock::time_point GetBootTime()
+    {
+        auto time = std::chrono::system_clock::now();
+        struct sysinfo si;
+        if (sysinfo(&si) == 0) {
+            time -= std::chrono::seconds(si.uptime);
+        }
+        return time;
     }
 }
 
@@ -361,7 +385,8 @@ TMQTTJournaldGateway::TMQTTJournaldGateway(PMqttClient mqttClient,
       RequestsRpcServer(requestsRpcServer),
       CancelRequestsRpcServer(cancelRequestsRpcServer),
       Boots(GetBoots()),
-      CancelLoading(false)
+      CancelLoading(false),
+      BootTime(GetBootTime())
 {
     RequestsRpcServer->RegisterMethod("logs", "List", std::bind(&TMQTTJournaldGateway::List, this, std::placeholders::_1));
     RequestsRpcServer->RegisterMethod("logs", "Load", std::bind(&TMQTTJournaldGateway::Load, this, std::placeholders::_1));
@@ -387,7 +412,7 @@ Json::Value TMQTTJournaldGateway::Load(const Json::Value& params)
     LOG(Debug) << "Run RPC Load()";
     try {
         CancelLoading = false;
-        return GetLogs(params, CancelLoading);
+        return GetLogs(params, CancelLoading, BootTime);
     } catch (const std::exception& e) {
         LOG(Error) << e.what();
         throw;
