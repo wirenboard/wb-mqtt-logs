@@ -14,6 +14,7 @@
 #include <sys/sysinfo.h>
 
 using namespace WBMQTT;
+using icu::UnicodeString;
 
 #define LOG(logger) ::logger.Log() << "[logs] "
 
