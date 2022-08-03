@@ -1,3 +1,9 @@
+wb-mqtt-logs (1.4.1) stable; urgency=medium
+
+  * Report boot list parsing errors as warnings not as fatal errors
+
+ -- Petr Krasnoshchekov <petr.krasnoshchekov@wirenboard.ru>  Wed, 03 Aug 2022 20:53:02 +0500
+
 wb-mqtt-logs (1.4.0) stable; urgency=medium
 
   * Port for Debian bullseye
