@@ -1,3 +1,9 @@
+wb-mqtt-logs (1.4.1) stable; urgency=medium
+
+  * Temporary version bump (test only)
+
+ -- Vladimir Romanov <v.romanov@wirenboard.ru>  Tue, 09 Aug 2022 18:50:16 +0300
+
 wb-mqtt-logs (1.4.0) stable; urgency=medium
 
   * Port for Debian bullseye
@@ -43,6 +49,6 @@ wb-mqtt-logs (1.1.0) unstable; urgency=medium
 
 wb-mqtt-logs (1.0.0) unstable; urgency=medium
 
-  * Initial release. 
+  * Initial release.
 
  -- Petr Krasnoshchekov <petr.krasnoshchekov@wirenboard.ru>  Fri, 27 Aug 2021 18:05:00 +0500
