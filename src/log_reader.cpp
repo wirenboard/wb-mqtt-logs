@@ -79,7 +79,7 @@ namespace
             try {
                 res.append(GetBootRec(boot));
             } catch (const std::exception& e) {
-                throw std::runtime_error("Failed to parse boot string '" + boot + "'");
+                LOG(Warn) << "Failed to parse boot string '" + boot + "'";
             }
         }
         return res;
