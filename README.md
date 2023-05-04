@@ -3,7 +3,7 @@ wb-mqtt-logs
 
 Сервис, предоставляющий доступ к логам из journald через MQTT.
 
-Протокол для получения данных логов: https://github.com/contactless/mqtt-rpc
+Протокол для получения данных логов: https://github.com/wirenboard/mqtt-rpc
 
 Запросы MQTT RPC
 ================
