@@ -6,22 +6,22 @@
 #include <set>
 #include <unicode/regex.h>
 
+#include <sys/sysinfo.h>
+#include <syslog.h>
+#include <systemd/sd-journal.h>
 #include <wblib/exceptions.h>
 #include <wblib/json_utils.h>
 #include <wblib/mqtt.h>
-#include <syslog.h>
-#include <systemd/sd-journal.h>
-#include <sys/sysinfo.h>
 
 using namespace WBMQTT;
-using icu::UnicodeString;
 using icu::RegexMatcher;
+using icu::UnicodeString;
 
 #define LOG(logger) ::logger.Log() << "[logs] "
 
 namespace
 {
-    const auto     DMESG_SERVICE   = "dmesg";
+    const auto DMESG_SERVICE = "dmesg";
     const uint32_t MAX_LOG_RECORDS = 100;
 
     void SdThrowError(int res, const std::string& msg)
@@ -34,12 +34,12 @@ namespace
     std::vector<std::string> ExecCommand(const std::string& cmd)
     {
         std::unique_ptr<FILE, decltype(&pclose)> fd(popen(cmd.c_str(), "r"), pclose);
-        if(!fd) {
+        if (!fd) {
             throw std::runtime_error("Cannot open pipe for '" + cmd + "'");
         }
         std::array<char, 256> buffer;
         std::string result;
-        while(!feof(fd.get())) {
+        while (!feof(fd.get())) {
             auto bytes = fread(buffer.data(), 1, buffer.size(), fd.get());
             result.append(buffer.data(), bytes);
         }
@@ -75,7 +75,7 @@ namespace
         Json::Value res;
         auto boots = ExecCommand("journalctl --utc --list-boots");
         std::reverse(boots.begin(), boots.end());
-        for(const auto& boot: boots) {
+        for (const auto& boot: boots) {
             try {
                 res.append(GetBootRec(boot));
             } catch (const std::exception& e) {
@@ -91,7 +91,7 @@ namespace
         const auto servicePostfixLen = strlen(servicePostfix);
         Json::Value res(Json::arrayValue);
         auto services = ExecCommand("systemctl list-unit-files *.service");
-        for(const auto& service: services) {
+        for (const auto& service: services) {
             auto pos = service.find(servicePostfix);
             if (pos != std::string::npos) {
                 res.append(service.substr(0, pos + servicePostfixLen));
@@ -110,7 +110,7 @@ namespace
     {
         const char* d;
         size_t l;
-        int r = sd_journal_get_data(j, fieldName.c_str(), (const void **)&d, &l);
+        int r = sd_journal_get_data(j, fieldName.c_str(), (const void**)&d, &l);
         if (r == 0 && l > fieldName.size() + 1) {
             return d + fieldName.size() + 1;
         }
@@ -119,14 +119,14 @@ namespace
 
     struct TJournalctlFilterParams
     {
-        bool                        Backward = true;
-        std::string                 Service;
-        uint32_t                    MaxEntries = MAX_LOG_RECORDS;
-        std::chrono::microseconds   From;
-        std::string                 Cursor;
-        UnicodeString               Pattern;
-        bool                        CaseSensitive = true;
-        bool                        RegEx = false;
+        bool Backward = true;
+        std::string Service;
+        uint32_t MaxEntries = MAX_LOG_RECORDS;
+        std::chrono::microseconds From;
+        std::string Cursor;
+        UnicodeString Pattern;
+        bool CaseSensitive = true;
+        bool RegEx = false;
     };
 
     TJournalctlFilterParams SetFilter(sd_journal* j, const Json::Value& params)
@@ -151,7 +151,8 @@ namespace
                 int l = lv.asInt();
                 if (l >= LOG_EMERG && l <= LOG_DEBUG && 0 == levels.count(l)) {
                     levels.insert(l);
-                    SdThrowError(sd_journal_add_match(j, ("PRIORITY=" + std::to_string(l)).c_str(), 0), "Adding match failed");
+                    SdThrowError(sd_journal_add_match(j, ("PRIORITY=" + std::to_string(l)).c_str(), 0),
+                                 "Adding match failed");
                 }
             }
         }
@@ -196,11 +197,9 @@ namespace
     }
 
     // libwbmqtt1 log prefixes to syslog severity levels map
-    const std::vector<std::pair<std::string, int>> LibWbMqttLogLevels = {
-        {"ERROR:",   LOG_ERR    },
-        {"WARNING:", LOG_WARNING},
-        {"DEBUG:",   LOG_DEBUG  }
-    };
+    const std::vector<std::pair<std::string, int>> LibWbMqttLogLevels = {{"ERROR:", LOG_ERR},
+                                                                         {"WARNING:", LOG_WARNING},
+                                                                         {"DEBUG:", LOG_DEBUG}};
 
     bool HasSubstring(const UnicodeString& msg, const UnicodeString& pattern, bool caseSensitive)
     {
@@ -245,7 +244,7 @@ namespace
         }
         entry["msg"] = d;
         if (!entry.isMember("level")) {
-            std::any_of(LibWbMqttLogLevels.begin(), LibWbMqttLogLevels.end(), [&](const auto& p){
+            std::any_of(LibWbMqttLogLevels.begin(), LibWbMqttLogLevels.end(), [&](const auto& p) {
                 if (StringStartsWith(d, p.first)) {
                     entry["level"] = p.second;
                     return true;
@@ -261,7 +260,7 @@ namespace
         uint64_t ts;
         SdThrowError(sd_journal_get_realtime_usec(j, &ts), "Failed to read timestamp");
         // __REALTIME_TIMESTAMP is in microseconds, convert it to milliseconds
-        entry["time"] = ts/1000;
+        entry["time"] = ts / 1000;
     }
 
     void AddPriority(sd_journal* j, Json::Value& entry)
@@ -359,8 +358,8 @@ namespace
         return res;
     }
 
-    Json::Value GetLogs(const Json::Value&                    params,
-                        std::atomic_bool&                     cancelLoading,
+    Json::Value GetLogs(const Json::Value& params,
+                        std::atomic_bool& cancelLoading,
                         std::chrono::system_clock::time_point bootTime)
     {
         if (params.get("service", "").asString() == DMESG_SERVICE) {
@@ -390,9 +389,15 @@ TMQTTJournaldGateway::TMQTTJournaldGateway(PMqttClient mqttClient,
       CancelLoading(false),
       BootTime(GetBootTime())
 {
-    RequestsRpcServer->RegisterMethod("logs", "List", std::bind(&TMQTTJournaldGateway::List, this, std::placeholders::_1));
-    RequestsRpcServer->RegisterMethod("logs", "Load", std::bind(&TMQTTJournaldGateway::Load, this, std::placeholders::_1));
-    CancelRequestsRpcServer->RegisterMethod("logs", "CancelLoad", std::bind(&TMQTTJournaldGateway::CancelLoad, this, std::placeholders::_1));
+    RequestsRpcServer->RegisterMethod("logs",
+                                      "List",
+                                      std::bind(&TMQTTJournaldGateway::List, this, std::placeholders::_1));
+    RequestsRpcServer->RegisterMethod("logs",
+                                      "Load",
+                                      std::bind(&TMQTTJournaldGateway::Load, this, std::placeholders::_1));
+    CancelRequestsRpcServer->RegisterMethod("logs",
+                                            "CancelLoad",
+                                            std::bind(&TMQTTJournaldGateway::CancelLoad, this, std::placeholders::_1));
 }
 
 Json::Value TMQTTJournaldGateway::List(const Json::Value& /*params*/)
@@ -402,8 +407,7 @@ Json::Value TMQTTJournaldGateway::List(const Json::Value& /*params*/)
     try {
         res["boots"] = Boots;
         res["services"] = GetServices();
-    }
-    catch(const std::exception& e) {
+    } catch (const std::exception& e) {
         LOG(Error) << e.what();
     }
     return res;

@@ -1,8 +1,8 @@
 #include <getopt.h>
 #include <wblib/signal_handling.h>
 
-#include "log_reader.h"
 #include "log.h"
+#include "log_reader.h"
 
 using namespace std;
 using namespace std::chrono;
@@ -34,74 +34,72 @@ namespace
              << "  -T   prefix    MQTT topic prefix (optional)" << endl;
     }
 
-    void ParseCommadLine(int                           argc,
-                         char*                         argv[],
-                         WBMQTT::TMosquittoMqttConfig& mqttConfig)
+    void ParseCommadLine(int argc, char* argv[], WBMQTT::TMosquittoMqttConfig& mqttConfig)
     {
         int debugLevel = 0;
         int c;
         while ((c = getopt(argc, argv, "d:h:H:p:u:P:T:")) != -1) {
             switch (c) {
-            case 'd':
-                debugLevel = stoi(optarg);
-                break;
-            case 'p':
-                mqttConfig.Port = stoi(optarg);
-                break;
-            case 'h':
-            case 'H': // backward compatibility
-                mqttConfig.Host = optarg;
-                break;
-            case 'T':
-                mqttConfig.Prefix = optarg;
-                break;
-            case 'u':
-                mqttConfig.User = optarg;
-                break;
-            case 'P':
-                mqttConfig.Password = optarg;
-                break;
+                case 'd':
+                    debugLevel = stoi(optarg);
+                    break;
+                case 'p':
+                    mqttConfig.Port = stoi(optarg);
+                    break;
+                case 'h':
+                case 'H': // backward compatibility
+                    mqttConfig.Host = optarg;
+                    break;
+                case 'T':
+                    mqttConfig.Prefix = optarg;
+                    break;
+                case 'u':
+                    mqttConfig.User = optarg;
+                    break;
+                case 'P':
+                    mqttConfig.Password = optarg;
+                    break;
 
-            case '?':
-            default:
-                PrintUsage();
-                exit(2);
+                case '?':
+                default:
+                    PrintUsage();
+                    exit(2);
             }
         }
 
         switch (debugLevel) {
-        case 0:
-            break;
-        case -1:
-            Info.SetEnabled(false);
-            break;
+            case 0:
+                break;
+            case -1:
+                Info.SetEnabled(false);
+                break;
 
-        case -2:
-            WBMQTT::Info.SetEnabled(false);
-            break;
+            case -2:
+                WBMQTT::Info.SetEnabled(false);
+                break;
 
-        case -3:
-            WBMQTT::Info.SetEnabled(false);
-            Info.SetEnabled(false);
-            break;
+            case -3:
+                WBMQTT::Info.SetEnabled(false);
+                Info.SetEnabled(false);
+                break;
 
-        case 1:
-            Debug.SetEnabled(true);
-            break;
+            case 1:
+                Debug.SetEnabled(true);
+                break;
 
-        case 2:
-            WBMQTT::Debug.SetEnabled(true);
-            break;
+            case 2:
+                WBMQTT::Debug.SetEnabled(true);
+                break;
 
-        case 3:
-            WBMQTT::Debug.SetEnabled(true);
-            Debug.SetEnabled(true);
-            break;
+            case 3:
+                WBMQTT::Debug.SetEnabled(true);
+                Debug.SetEnabled(true);
+                break;
 
-        default:
-            cout << "Invalid -d parameter value " << debugLevel << endl;
-            PrintUsage();
-            exit(2);
+            default:
+                cout << "Invalid -d parameter value " << debugLevel << endl;
+                PrintUsage();
+                exit(2);
         }
 
         if (optind < argc) {
