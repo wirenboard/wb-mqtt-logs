@@ -1,3 +1,5 @@
+PREFIX = /usr
+
 ifneq ($(DEB_HOST_MULTIARCH),)
 	CROSS_COMPILE ?= $(DEB_HOST_MULTIARCH)-
 endif
@@ -40,10 +42,10 @@ endif
 all : $(APP_BIN)
 
 $(APP_BIN): $(COMMON_OBJS) $(BUILD_DIR)/src/main.cpp.o
-	${CXX} -o $(BUILD_DIR)/$@ $^ $(LDFLAGS)
+	$(CXX) -o $(BUILD_DIR)/$@ $^ $(LDFLAGS)
 
 $(BUILD_DIR)/%.c.o: %.c
-	${CC} -c $< -o $@ ${CFLAGS}
+	$(CC) -c $< -o $@ $(CFLAGS)
 
 $(BUILD_DIR)/%.cpp.o: %.cpp
 	mkdir -p $(dir $@)
@@ -53,4 +55,4 @@ clean :
 	rm -rf $(BUILD_DIR)
 
 install:
-	install -D -m 0755  $(BUILD_DIR)/$(APP_BIN) $(DESTDIR)/usr/bin/$(APP_BIN)
+	install -Dm0755 $(BUILD_DIR)/$(APP_BIN) -t $(DESTDIR)$(PREFIX)/bin

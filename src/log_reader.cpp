@@ -177,7 +177,7 @@ namespace
     Json::Value GetDmesgLogs(std::chrono::system_clock::time_point bootTime)
     {
         Json::Value res(Json::arrayValue);
-        for (const auto& s: ExecCommand("dmesg --color=never")) {
+        for (const auto& s: ExecCommand("dmesg --color=never --force-prefix")) {
             Json::Value entry;
             size_t p = 0;
             if (s[0] == '[') {
