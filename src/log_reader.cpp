@@ -174,33 +174,6 @@ namespace
         return filter;
     }
 
-    Json::Value GetDmesgLogs(std::chrono::system_clock::time_point bootTime)
-    {
-        Json::Value res(Json::arrayValue);
-        for (const auto& s: ExecCommand("dmesg --color=never --force-prefix")) {
-            Json::Value entry;
-            size_t p = 0;
-            if (s[0] == '[') {
-                auto sec = strtod(s.c_str() + 1, nullptr);
-                auto t = bootTime + std::chrono::milliseconds(static_cast<std::chrono::milliseconds::rep>(sec * 1000));
-                entry["time"] = std::chrono::duration_cast<std::chrono::milliseconds>(t.time_since_epoch()).count();
-                p = s.find(']');
-                p = (p == std::string::npos) ? 0 : p + 1;
-                if (s[p] == ' ') {
-                    ++p;
-                }
-            }
-            entry["msg"] = s.substr(p);
-            res.append(entry);
-        }
-        return res;
-    }
-
-    // libwbmqtt1 log prefixes to syslog severity levels map
-    const std::vector<std::pair<std::string, int>> LibWbMqttLogLevels = {{"ERROR:", LOG_ERR},
-                                                                         {"WARNING:", LOG_WARNING},
-                                                                         {"DEBUG:", LOG_DEBUG}};
-
     bool HasSubstring(const UnicodeString& msg, const UnicodeString& pattern, bool caseSensitive)
     {
         if (caseSensitive) {
@@ -223,6 +196,58 @@ namespace
         }
         return ok;
     }
+
+    Json::Value ParseDmesgLog(const std::string& line, std::chrono::system_clock::time_point bootTime)
+    {
+        Json::Value entry;
+        size_t p = 0;
+        if (line[0] == '[') {
+            auto sec = strtod(line.c_str() + 1, nullptr);
+            auto t = bootTime + std::chrono::milliseconds(static_cast<std::chrono::milliseconds::rep>(sec * 1000));
+            entry["time"] = std::chrono::duration_cast<std::chrono::milliseconds>(t.time_since_epoch()).count();
+            p = line.find(']');
+            p = (p == std::string::npos) ? 0 : p + 1;
+            if (line[p] == ' ') {
+                ++p;
+            }
+        }
+        entry["msg"] = line.substr(p);
+        return entry;
+    }
+
+    Json::Value GetDmesgLogs(const Json::Value& params, std::chrono::system_clock::time_point bootTime)
+    {
+        Json::Value res(Json::arrayValue);
+
+        auto pattern = UnicodeString::fromUTF8(params.get("pattern", "").asString());
+        auto caseSensitive = params.get("case-sensitive", true).asBool();
+        auto regEx = params.get("regex", false).asBool();
+
+        for (const auto& s: ExecCommand("dmesg --color=never --force-prefix")) {
+            Json::Value entry(ParseDmesgLog(s, bootTime));
+
+            if (!pattern.isEmpty()) {
+                auto msg = UnicodeString::fromUTF8(entry["msg"].asString());
+                if (regEx) {
+                    if (!MatchesRegex(msg, pattern, caseSensitive)) {
+                        continue;
+                    }
+                } else {
+                    if (!HasSubstring(msg, pattern, caseSensitive)) {
+                        continue;
+                    }
+                }
+            }
+
+            res.append(entry);
+        }
+        return res;
+    }
+
+    // libwbmqtt1 log prefixes to syslog severity levels map
+    const std::vector<std::pair<std::string, int>> LibWbMqttLogLevels = {{"ERROR:", LOG_ERR},
+                                                                         {"WARNING:", LOG_WARNING},
+                                                                         {"DEBUG:", LOG_DEBUG}};
 
     bool AddMsg(sd_journal* j, Json::Value& entry, const UnicodeString& pattern, bool caseSensitive, bool regEx)
     {
@@ -363,7 +388,7 @@ namespace
                         std::chrono::system_clock::time_point bootTime)
     {
         if (params.get("service", "").asString() == DMESG_SERVICE) {
-            return GetDmesgLogs(bootTime);
+            return GetDmesgLogs(params, bootTime);
         }
         return GetJouralctlLogs(params, cancelLoading);
     }

@@ -1,3 +1,9 @@
+wb-mqtt-logs (1.4.6) stable; urgency=medium
+
+  * Fix dmesg log filtering
+
+ -- Nikolay Korotkiy <nikolay.korotkiy@wirenboard.com>  Wed, 24 Apr 2024 18:45:00 +0400
+
 wb-mqtt-logs (1.4.5) stable; urgency=medium
 
   * Fix missed timestamp on dmesg line of a multi-line message
@@ -73,6 +79,6 @@ wb-mqtt-logs (1.1.0) unstable; urgency=medium
 
 wb-mqtt-logs (1.0.0) unstable; urgency=medium
 
-  * Initial release. 
+  * Initial release.
 
  -- Petr Krasnoshchekov <petr.krasnoshchekov@wirenboard.ru>  Fri, 27 Aug 2021 18:05:00 +0500
