@@ -1,3 +1,9 @@
+wb-mqtt-logs (1.4.7) stable; urgency=medium
+
+  * Fix uninitialized variable
+
+ -- Nikolay Korotkiy <nikolay.korotkiy@wirenboard.com>  Wed, 24 Jul 2024 16:45:00 +0400
+
 wb-mqtt-logs (1.4.6) stable; urgency=medium
 
   * Fix dmesg log filtering
