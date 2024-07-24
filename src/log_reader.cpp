@@ -122,7 +122,7 @@ namespace
         bool Backward = true;
         std::string Service;
         uint32_t MaxEntries = MAX_LOG_RECORDS;
-        std::chrono::microseconds From;
+        std::chrono::microseconds From = std::chrono::microseconds::zero();
         std::string Cursor;
         UnicodeString Pattern;
         bool CaseSensitive = true;
