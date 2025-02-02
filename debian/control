@@ -14,3 +14,4 @@ Package: wb-mqtt-logs
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: Wiren Board journald to MQTT gateway
+ wb-mqtt-logs is a service which provides access to logs from journald via MQTT.
