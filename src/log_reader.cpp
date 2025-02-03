@@ -90,7 +90,7 @@ namespace
         const char* servicePostfix = ".service";
         const auto servicePostfixLen = strlen(servicePostfix);
         Json::Value res(Json::arrayValue);
-        auto services = ExecCommand("systemctl list-unit-files *.service");
+        auto services = ExecCommand("systemctl list-units --type=service --state=loaded --no-pager --plain");
         for (const auto& service: services) {
             auto pos = service.find(servicePostfix);
             if (pos != std::string::npos) {
