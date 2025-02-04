@@ -117,9 +117,15 @@ namespace
         return nullptr;
     }
 
+    enum class TFilterDirection
+    {
+        Forward,
+        Backward,
+        Default
+    };
     struct TJournalctlFilterParams
     {
-        bool Backward = true;
+        TFilterDirection Direction = TFilterDirection::Default;
         std::string Service;
         uint32_t MaxEntries = MAX_LOG_RECORDS;
         std::chrono::microseconds From = std::chrono::microseconds::zero();
@@ -164,7 +170,13 @@ namespace
         if (params.isMember("cursor")) {
             auto& cursor = params["cursor"];
             filter.Cursor = cursor.get("id", "").asString();
-            filter.Backward = (cursor.get("direction", "backward").asString() == "backward");
+
+            auto directionString = cursor.get("direction", "").asString();
+            if (directionString == "forward") {
+                filter.Direction = TFilterDirection::Forward;
+            } else if (directionString == "backward") {
+                filter.Direction = TFilterDirection::Backward;
+            }
         }
 
         filter.Pattern = UnicodeString::fromUTF8(params.get("pattern", "").asString());
@@ -334,10 +346,10 @@ namespace
 
         auto filter = SetFilter(j, params);
 
-        auto moveFn = filter.Backward ? sd_journal_previous : sd_journal_next;
+        auto moveFn = filter.Direction == TFilterDirection::Forward ? sd_journal_next : sd_journal_previous;
         if (!filter.Cursor.empty()) {
             SdThrowError(sd_journal_seek_cursor(j, filter.Cursor.c_str()), "Failed to seek to tail of journal");
-            if (!filter.Backward) {
+            if (filter.Direction != TFilterDirection::Default) {
                 moveFn(j); // Pass pointed by cursor record
             }
         } else if (filter.From.count() > 0) {
@@ -367,7 +379,7 @@ namespace
         }
 
         // Forward queries return rows in ascending order, but we want a descending order
-        if (!filter.Backward) {
+        if (filter.Direction == TFilterDirection::Forward) {
             std::reverse(res.begin(), res.end());
         }
         return res;
