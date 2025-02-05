@@ -337,9 +337,7 @@ namespace
         auto moveFn = filter.Backward ? sd_journal_previous : sd_journal_next;
         if (!filter.Cursor.empty()) {
             SdThrowError(sd_journal_seek_cursor(j, filter.Cursor.c_str()), "Failed to seek to tail of journal");
-            if (!filter.Backward) {
-                moveFn(j); // Pass pointed by cursor record
-            }
+            moveFn(j); // Pass pointed by cursor record
         } else if (filter.From.count() > 0) {
             SdThrowError(sd_journal_seek_realtime_usec(j, filter.From.count()), "Failed to seek to tail of journal");
         } else {
