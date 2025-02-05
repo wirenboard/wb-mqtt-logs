@@ -117,15 +117,9 @@ namespace
         return nullptr;
     }
 
-    enum class TFilterDirection
-    {
-        Forward,
-        Backward,
-        Default
-    };
     struct TJournalctlFilterParams
     {
-        TFilterDirection Direction = TFilterDirection::Default;
+        bool Backward = true;
         std::string Service;
         uint32_t MaxEntries = MAX_LOG_RECORDS;
         std::chrono::microseconds From = std::chrono::microseconds::zero();
@@ -170,13 +164,7 @@ namespace
         if (params.isMember("cursor")) {
             auto& cursor = params["cursor"];
             filter.Cursor = cursor.get("id", "").asString();
-
-            auto directionString = cursor.get("direction", "").asString();
-            if (directionString == "forward") {
-                filter.Direction = TFilterDirection::Forward;
-            } else if (directionString == "backward") {
-                filter.Direction = TFilterDirection::Backward;
-            }
+            filter.Backward = (cursor.get("direction", "backward").asString() == "backward");
         }
 
         filter.Pattern = UnicodeString::fromUTF8(params.get("pattern", "").asString());
@@ -346,12 +334,10 @@ namespace
 
         auto filter = SetFilter(j, params);
 
-        auto moveFn = filter.Direction == TFilterDirection::Forward ? sd_journal_next : sd_journal_previous;
+        auto moveFn = filter.Backward ? sd_journal_previous : sd_journal_next;
         if (!filter.Cursor.empty()) {
             SdThrowError(sd_journal_seek_cursor(j, filter.Cursor.c_str()), "Failed to seek to tail of journal");
-            if (filter.Direction != TFilterDirection::Default) {
-                moveFn(j); // Pass pointed by cursor record
-            }
+            moveFn(j); // Pass pointed by cursor record
         } else if (filter.From.count() > 0) {
             SdThrowError(sd_journal_seek_realtime_usec(j, filter.From.count()), "Failed to seek to tail of journal");
         } else {
@@ -379,7 +365,7 @@ namespace
         }
 
         // Forward queries return rows in ascending order, but we want a descending order
-        if (filter.Direction == TFilterDirection::Forward) {
+        if (!filter.Backward) {
             std::reverse(res.begin(), res.end());
         }
         return res;
