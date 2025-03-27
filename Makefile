@@ -4,9 +4,6 @@ ifneq ($(DEB_HOST_MULTIARCH),)
 	CROSS_COMPILE ?= $(DEB_HOST_MULTIARCH)-
 endif
 
-ifeq ($(origin CC),default)
-	CC := $(CROSS_COMPILE)gcc
-endif
 ifeq ($(origin CXX),default)
 	CXX := $(CROSS_COMPILE)g++
 endif
@@ -29,7 +26,6 @@ COMMON_OBJS := $(COMMON_SRCS:%=$(BUILD_DIR)/%.o)
 
 LDFLAGS = -lpthread -lwbmqtt1 -lsystemd -licuuc -licui18n
 CXXFLAGS = -std=c++14 -Wall -Werror -I$(SRC_DIRS) -DWBMQTT_COMMIT="$(GIT_REVISION)" -DWBMQTT_VERSION="$(DEB_VERSION)" -Wno-psabi
-CFLAGS = -Wall -I$(SRC_DIR)
 
 ifeq ($(DEBUG),)
 	CXXFLAGS += -O3
@@ -43,9 +39,6 @@ all : $(APP_BIN)
 
 $(APP_BIN): $(COMMON_OBJS) $(BUILD_DIR)/src/main.cpp.o
 	$(CXX) -o $(BUILD_DIR)/$@ $^ $(LDFLAGS)
-
-$(BUILD_DIR)/%.c.o: %.c
-	$(CC) -c $< -o $@ $(CFLAGS)
 
 $(BUILD_DIR)/%.cpp.o: %.cpp
 	mkdir -p $(dir $@)

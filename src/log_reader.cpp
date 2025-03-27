@@ -33,7 +33,8 @@ namespace
 
     std::vector<std::string> ExecCommand(const std::string& cmd)
     {
-        std::unique_ptr<FILE, decltype(&pclose)> fd(popen(cmd.c_str(), "r"), pclose);
+        auto deleter = [](FILE* fp) { if (fp) pclose(fp); };
+        std::unique_ptr<FILE, decltype(deleter)> fd(popen(cmd.c_str(), "r"), deleter);
         if (!fd) {
             throw std::runtime_error("Cannot open pipe for '" + cmd + "'");
         }

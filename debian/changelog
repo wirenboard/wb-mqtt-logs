@@ -1,3 +1,9 @@
+wb-mqtt-logs (1.5.2) state; urgency=medium
+
+  * Fix build with gcc14
+
+ -- Nikolay Korotkiy <nikolay.korotkiy@wirenboard.com>  Thu, 27 Mar 2025 16:30:00 +0400
+
 wb-mqtt-logs (1.5.1) state; urgency=medium
 
   * Exclude first message from backward direction request
