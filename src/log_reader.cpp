@@ -33,7 +33,11 @@ namespace
 
     std::vector<std::string> ExecCommand(const std::string& cmd)
     {
-        std::unique_ptr<FILE, decltype(&pclose)> fd(popen(cmd.c_str(), "r"), pclose);
+        auto deleter = [](FILE* fp) {
+            if (fp)
+                pclose(fp);
+        };
+        std::unique_ptr<FILE, decltype(deleter)> fd(popen(cmd.c_str(), "r"), deleter);
         if (!fd) {
             throw std::runtime_error("Cannot open pipe for '" + cmd + "'");
         }
@@ -47,7 +51,8 @@ namespace
     }
 
     // Input string example:
-    // -1 e932c72aeb0b44c6a093b94797460151 Tue 2021-04-06 07:35:01 UTC—Tue 2021-04-06 07:44:15 UTC
+    // -1 e932c72aeb0b44c6a093b94797460151 Tue 2021-04-06 07:35:01 UTC—Tue
+    // 2021-04-06 07:44:15 UTC
     Json::Value GetBootRec(const std::string& str)
     {
         Json::Value res;
@@ -63,7 +68,8 @@ namespace
         ss >> std::get_time(&t, timeFormat);
         res["start"] = Json::Value::Int64(mktime(&t));
         if (bootId != 0) {
-            ss.seekg(3, std::ios_base::cur); // pass '—' U+2014 (0xe2, 0x80, 0x94) EM DASH
+            ss.seekg(3,
+                     std::ios_base::cur); // pass '—' U+2014 (0xe2, 0x80, 0x94) EM DASH
             ss >> std::get_time(&t, timeFormat);
             res["end"] = Json::Value::Int64(mktime(&t));
         }
@@ -295,8 +301,8 @@ namespace
             return;
         }
         auto level = atoi(d);
-        // journald sets LOG_INFO priority for all unprefixed messages got fom stderr/stdout
-        // They priority is set in ParseMsg according to a prefix.
+        // journald sets LOG_INFO priority for all unprefixed messages got fom
+        // stderr/stdout They priority is set in ParseMsg according to a prefix.
         if (level != LOG_INFO && !entry.isMember("level")) {
             entry["level"] = level;
         }
@@ -364,7 +370,8 @@ namespace
             LOG(Error) << "Failed to get next journal entry: " << strerror(-r);
         }
 
-        // Forward queries return rows in ascending order, but we want a descending order
+        // Forward queries return rows in ascending order, but we want a descending
+        // order
         if (!filter.Backward) {
             std::reverse(res.begin(), res.end());
         }
@@ -400,7 +407,7 @@ namespace
         }
         return time;
     }
-}
+} // namespace
 
 TMQTTJournaldGateway::TMQTTJournaldGateway(PMqttClient mqttClient,
                                            PMqttRpcServer requestsRpcServer,
