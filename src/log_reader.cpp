@@ -275,7 +275,12 @@ namespace
         }
         entry["msg"] = d;
         if (!entry.isMember("level")) {
-            (void)std::any_of(LibWbMqttLogLevels.begin(), LibWbMqttLogLevels.end(), [&](const auto& p) {
+            auto it=std::find_if(LibWbMqttLogLevels.begin(), LibWbMqttLogLevels.end(), [&](const auto& p) {
+            return StringStartsWith(d, p.first);
+            });
+            if (it != LibWbMqttLogLevels.end()) {
+               entry["level"] = it.second;
+            }
                 if (StringStartsWith(d, p.first)) {
                     entry["level"] = p.second;
                     return true;
