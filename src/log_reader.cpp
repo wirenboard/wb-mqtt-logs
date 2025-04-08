@@ -279,7 +279,7 @@ namespace
                 return StringStartsWith(d, p.first);
             });
             if (it != LibWbMqttLogLevels.end()) {
-                entry["level"] = it.second;
+                entry["level"] = it->second;
             }
         }
         return true;
