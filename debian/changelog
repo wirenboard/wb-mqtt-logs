@@ -1,3 +1,9 @@
+wb-mqtt-logs (1.5.3) state; urgency=medium
+
+  * Fix build with icu>=75
+
+ -- Nikolay Korotkiy <nikolay.korotkiy@wirenboard.com>  Mon, 08 Apr 2025 16:30:00 +0400
+
 wb-mqtt-logs (1.5.2) state; urgency=medium
 
   * Fix build with gcc14

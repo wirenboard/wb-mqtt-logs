@@ -2,7 +2,7 @@ Source: wb-mqtt-logs
 Maintainer: Wiren Board team <info@wirenboard.com>
 Section: misc
 Priority: optional
-Standards-Version: 3.9.2
+Standards-Version: 4.5.1
 Build-Depends: debhelper (>= 10), 
                pkg-config, 
                libwbmqtt1-5-dev,
