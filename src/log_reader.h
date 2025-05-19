@@ -9,11 +9,7 @@ public:
     TMQTTJournaldGateway(WBMQTT::PMqttClient mqttClient,
                          WBMQTT::PMqttRpcServer requestsRpcServer,
                          WBMQTT::PMqttRpcServer cancelRequestsRpcServer);
-
-    inline void ForceCancelLoading()
-    {
-        CancelLoading = true;
-    }
+    ~TMQTTJournaldGateway();
 
 private:
     Json::Value Load(const Json::Value& params);
