@@ -10,6 +10,11 @@ public:
                          WBMQTT::PMqttRpcServer requestsRpcServer,
                          WBMQTT::PMqttRpcServer cancelRequestsRpcServer);
 
+    inline void ForceCancelLoading()
+    {
+        CancelLoading = true;
+    }
+
 private:
     Json::Value Load(const Json::Value& params);
     Json::Value List(const Json::Value& params);

@@ -157,6 +157,7 @@ int main(int argc, char* argv[])
         requestsRpcServer->Start();
         cancelRequestsRpcServer->Start();
         WBMQTT::SignalHandling::Wait();
+        gw.ForceCancelLoading();
         cancelRequestsRpcServer->Stop();
         requestsRpcServer->Stop();
         mqttClient->Stop();
