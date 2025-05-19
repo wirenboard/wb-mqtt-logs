@@ -9,6 +9,7 @@ public:
     TMQTTJournaldGateway(WBMQTT::PMqttClient mqttClient,
                          WBMQTT::PMqttRpcServer requestsRpcServer,
                          WBMQTT::PMqttRpcServer cancelRequestsRpcServer);
+    ~TMQTTJournaldGateway();
 
 private:
     Json::Value Load(const Json::Value& params);

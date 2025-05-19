@@ -429,6 +429,11 @@ TMQTTJournaldGateway::TMQTTJournaldGateway(PMqttClient mqttClient,
                                             std::bind(&TMQTTJournaldGateway::CancelLoad, this, std::placeholders::_1));
 }
 
+TMQTTJournaldGateway::~TMQTTJournaldGateway()
+{
+    CancelLoading = true;
+}
+
 Json::Value TMQTTJournaldGateway::List(const Json::Value& /*params*/)
 {
     LOG(Debug) << "Run RPC List()";

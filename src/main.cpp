@@ -151,12 +151,15 @@ int main(int argc, char* argv[])
         auto mqttClient(WBMQTT::NewMosquittoMqttClient(mqttConfig));
         auto requestsRpcServer(WBMQTT::NewMqttRpcServer(mqttClient, "wb_logs"));
         auto cancelRequestsRpcServer(WBMQTT::NewMqttRpcServer(mqttClient, "wb_logs"));
-        TMQTTJournaldGateway gw(mqttClient, requestsRpcServer, cancelRequestsRpcServer);
-        initialized.Complete();
-        mqttClient->Start();
-        requestsRpcServer->Start();
-        cancelRequestsRpcServer->Start();
-        WBMQTT::SignalHandling::Wait();
+        // braces added to call TMQTTJournaldGateway destructor immediately after signal received
+        {
+            TMQTTJournaldGateway gw(mqttClient, requestsRpcServer, cancelRequestsRpcServer);
+            initialized.Complete();
+            mqttClient->Start();
+            requestsRpcServer->Start();
+            cancelRequestsRpcServer->Start();
+            WBMQTT::SignalHandling::Wait();
+        }
         cancelRequestsRpcServer->Stop();
         requestsRpcServer->Stop();
         mqttClient->Stop();
