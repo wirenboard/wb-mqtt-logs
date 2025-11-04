@@ -120,6 +120,7 @@ components:
         $ref: '#/components/schemas/logsCancelLoadReplyPayload'
   schemas:
     levelItem:
+      description: Уровень важности сообщения
       type: number
       enum:
         - 0
@@ -130,19 +131,32 @@ components:
         - 5
         - 6
         - 7
+      x-enumDescriptions:
+        - emerg (0)
+        - alert (1)
+        - crit (2)
+        - err (3)
+        - warning (4)
+        - notice (5)
+        - info (6)
+        - debug (7)
     bootItem:
       type: object
       properties:
         hash:
+          description: ID сеанса (https://www.freedesktop.org/software/systemd/man/systemd.journal-fields.html#_BOOT_ID=)
           type: string
         start:
+          description: Временная метка начала сеанса (UNIX timestamp UTC)
           type: number
         end:
+          description: Временная метка завершения сеанса (UNIX timestamp UTC), отсутствует для текущего сеанса
           type: number
       required:
         - hash
         - start
     directionItem:
+      description: Направление выборки относительно курсора
       type: string
       enum:
         - forward
@@ -169,10 +183,12 @@ components:
             type: object
             properties:
               boots:
+                description: Массив сеансов журнала
                 type: array
                 items:
                   $ref: '#/components/schemas/bootItem'
               services:
+                description: Массив названий сервисов, установленных на контроллере
                 type: array
                 items:
                   type: string
@@ -191,12 +207,16 @@ components:
           type: object
           properties:
             boot:
+              description: ID сеанса (https://www.freedesktop.org/software/systemd/man/systemd.journal-fields.html#_BOOT_ID=)
               type: string
             service:
+              description: Название сервиса
               type: string
             time:
+              description: Временная метка первого сообщения в логе (UNIX timestamp UTC) в секундах
               type: number
             levels:
+              description: Массив с номерами уровней важности сообщений. Если не указан, выбираются все сообщения
               type: array
               items:
                 $ref: '#/components/schemas/levelItem'
@@ -210,6 +230,7 @@ components:
                 - 6
                 - 7
             pattern:
+              description: Шаблон поиска сообщений, может содержать строку или регулярное выражение
               type: string
             cursor:
               type: object
@@ -217,15 +238,19 @@ components:
                 direction:
                   $ref: '#/components/schemas/directionItem'
                 id:
+                  description: Уникальный идентификатор сообщения в journald
                   type: string
             limit:
+              description: Максимальное количество записей в ответе
               type: number
               default: 100
               maximum: 100
             case-sensitive:
+              description: Учитывать регистр символов при поиске по шаблону
               type: boolean
               default: true
             regex:
+              description: Шаблон в виде регулярного выражения
               type: boolean
               default: false
       required:
@@ -242,16 +267,21 @@ components:
             type: object
             properties:
               msg:
+                description: Текст сообщения
                 type: string
               service:
+                description: Название сервиса, передаётся, если не было указано в запросе
                 type: string
               level:
+                description: Уровень сообщения, не передаётся для уровня SYS_INFO(6)
                 allOf:
                   - $ref: '#/components/schemas/levelItem'
                 default: 6
               time:
+                description: Временная метка (UNIX timestamp UTC) в миллисекундах
                 type: number
               cursor:
+                description: Уникальный идентификатор сообщения в journald (https://www.freedesktop.org/software/systemd/man/systemd.journal-fields.html#__CURSOR=). Может присутствовать в первом и последнем объекте массива
                 type: string
       required:
         - id
