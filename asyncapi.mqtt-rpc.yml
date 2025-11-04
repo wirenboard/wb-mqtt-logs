@@ -1,0 +1,287 @@
+asyncapi: '3.0.0'
+info:
+  title: wb-mqtt-logs MQTT-RPC API
+  version: '1.0.0'
+defaultContentType: application/json
+channels:
+  logsList:
+    address: '/rpc/v1/wb_logs/logs/List/{clientId}'
+    messages:
+      logsList:
+        $ref: '#/components/messages/logsList'
+    parameters:
+      clientId:
+        $ref: '#/components/parameters/clientId'
+  logsListReply:
+    address: '/rpc/v1/wb_logs/logs/List/{clientId}/reply'
+    messages:
+      logsListReply:
+        $ref: '#/components/messages/logsListReply'
+    parameters:
+      clientId:
+        $ref: '#/components/parameters/clientId'
+  logsLoad:
+    address: '/rpc/v1/wb_logs/logs/Load/{clientId}'
+    messages:
+      logsLoad:
+        $ref: '#/components/messages/logsLoad'
+    parameters:
+      clientId:
+        $ref: '#/components/parameters/clientId'
+  logsLoadReply:
+    address: '/rpc/v1/wb_logs/logs/Load/{clientId}/reply'
+    messages:
+      logsLoadReply:
+        $ref: '#/components/messages/logsLoadReply'
+    parameters:
+      clientId:
+        $ref: '#/components/parameters/clientId'
+  logsCancelLoad:
+    address: '/rpc/v1/wb_logs/logs/CancelLoad/{clientId}'
+    messages:
+      logsCancelLoad:
+        $ref: '#/components/messages/logsCancelLoad'
+    parameters:
+      clientId:
+        $ref: '#/components/parameters/clientId'
+  logsCancelLoadReply:
+    address: '/rpc/v1/wb_logs/logs/CancelLoad/{clientId}/reply'
+    messages:
+      logsCancelLoadReply:
+        $ref: '#/components/messages/logsCancelLoadReply'
+    parameters:
+      clientId:
+        $ref: '#/components/parameters/clientId'
+operations:
+  logsList:
+    action: send
+    channel:
+      $ref: '#/channels/logsList'
+    traits:
+      - $ref: '#/components/operationTraits/mqtt'
+    messages:
+      - $ref: '#/channels/logsList/messages/logsList'
+    reply:
+      channel:
+        $ref: '#/channels/logsListReply'
+      messages:
+        - $ref: '#/channels/logsListReply/messages/logsListReply'
+  logsLoad:
+    action: send
+    channel:
+      $ref: '#/channels/logsLoad'
+    traits:
+      - $ref: '#/components/operationTraits/mqtt'
+    messages:
+      - $ref: '#/channels/logsLoad/messages/logsLoad'
+    reply:
+      channel:
+        $ref: '#/channels/logsLoadReply'
+      messages:
+        - $ref: '#/channels/logsLoadReply/messages/logsLoadReply'
+  logsCancelLoad:
+    action: send
+    channel:
+      $ref: '#/channels/logsCancelLoad'
+    traits:
+      - $ref: '#/components/operationTraits/mqtt'
+    messages:
+      - $ref: '#/channels/logsCancelLoad/messages/logsCancelLoad'
+    reply:
+      channel:
+        $ref: '#/channels/logsCancelLoadReply'
+      messages:
+        - $ref: '#/channels/logsCancelLoadReply/messages/logsCancelLoadReply'
+components:
+  messages:
+    logsList:
+      name: logsList
+      payload:
+        $ref: '#/components/schemas/logsListPayload'
+    logsListReply:
+      name: logsListReply
+      payload:
+        $ref: '#/components/schemas/logsListReplyPayload'
+    logsLoad:
+      name: logsLoad
+      payload:
+        $ref: '#/components/schemas/logsLoadPayload'
+    logsLoadReply:
+      name: logsLoadReply
+      payload:
+        $ref: '#/components/schemas/logsLoadReplyPayload'
+    logsCancelLoad:
+      name: logsCancelLoad
+      payload:
+        $ref: '#/components/schemas/logsCancelLoadPayload'
+    logsCancelLoadReply:
+      name: logsCancelLoadReply
+      payload:
+        $ref: '#/components/schemas/logsCancelLoadReplyPayload'
+  schemas:
+    levelItem:
+      type: number
+      enum:
+        - 0
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        - 6
+        - 7
+    bootItem:
+      type: object
+      properties:
+        hash:
+          type: string
+        start:
+          type: number
+        end:
+          type: number
+      required:
+        - hash
+        - start
+    directionItem:
+      type: string
+      enum:
+        - forward
+        - backward
+      default: backward
+    logsListPayload:
+      type: object
+      properties:
+        id:
+          type: number
+        params:
+          type: object
+      required:
+        - id
+        - params
+    logsListReplyPayload:
+      type: object
+      properties:
+        id:
+          type: number
+        result:
+          type: array
+          items:
+            type: object
+            properties:
+              boots:
+                type: array
+                items:
+                  $ref: '#/components/schemas/bootItem'
+              services:
+                type: array
+                items:
+                  type: string
+            required:
+              - boots
+              - services
+      required:
+        - id
+        - result
+    logsLoadPayload:
+      type: object
+      properties:
+        id:
+          type: number
+        params:
+          type: object
+          properties:
+            boot:
+              type: string
+            service:
+              type: string
+            time:
+              type: number
+            levels:
+              type: array
+              items:
+                $ref: '#/components/schemas/levelItem'
+              default:
+                - 0
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+                - 6
+                - 7
+            pattern:
+              type: string
+            cursor:
+              type: object
+              properties:
+                direction:
+                  $ref: '#/components/schemas/directionItem'
+                id:
+                  type: string
+            limit:
+              type: number
+              default: 100
+              maximum: 100
+            case-sensitive:
+              type: boolean
+              default: true
+            regex:
+              type: boolean
+              default: false
+      required:
+        - id
+        - params
+    logsLoadReplyPayload:
+      type: object
+      properties:
+        id:
+          type: number
+        result:
+          type: array
+          items:
+            type: object
+            properties:
+              msg:
+                type: string
+              service:
+                type: string
+              level:
+                allOf:
+                  - $ref: '#/components/schemas/levelItem'
+                default: 6
+              time:
+                type: number
+              cursor:
+                type: string
+      required:
+        - id
+        - result
+    logsCancelLoadPayload:
+      type: object
+      properties:
+        id:
+          type: number
+        params:
+          type: object
+      required:
+        - id
+        - params
+    logsCancelLoadReplyPayload:
+      type: object
+      properties:
+        id:
+          type: number
+        result:
+          type: object
+          const: null
+      required:
+        - id
+        - result
+  parameters:
+    clientId:
+      description: UUID
+  operationTraits:
+    mqtt:
+      bindings:
+        mqtt:
+          qos: 1
