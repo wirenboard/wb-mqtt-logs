@@ -1,0 +1,317 @@
+asyncapi: '3.0.0'
+info:
+  title: wb-mqtt-logs MQTT-RPC API
+  version: '1.0.0'
+defaultContentType: application/json
+channels:
+  logsList:
+    address: '/rpc/v1/wb_logs/logs/List/{clientId}'
+    messages:
+      logsList:
+        $ref: '#/components/messages/logsList'
+    parameters:
+      clientId:
+        $ref: '#/components/parameters/clientId'
+  logsListReply:
+    address: '/rpc/v1/wb_logs/logs/List/{clientId}/reply'
+    messages:
+      logsListReply:
+        $ref: '#/components/messages/logsListReply'
+    parameters:
+      clientId:
+        $ref: '#/components/parameters/clientId'
+  logsLoad:
+    address: '/rpc/v1/wb_logs/logs/Load/{clientId}'
+    messages:
+      logsLoad:
+        $ref: '#/components/messages/logsLoad'
+    parameters:
+      clientId:
+        $ref: '#/components/parameters/clientId'
+  logsLoadReply:
+    address: '/rpc/v1/wb_logs/logs/Load/{clientId}/reply'
+    messages:
+      logsLoadReply:
+        $ref: '#/components/messages/logsLoadReply'
+    parameters:
+      clientId:
+        $ref: '#/components/parameters/clientId'
+  logsCancelLoad:
+    address: '/rpc/v1/wb_logs/logs/CancelLoad/{clientId}'
+    messages:
+      logsCancelLoad:
+        $ref: '#/components/messages/logsCancelLoad'
+    parameters:
+      clientId:
+        $ref: '#/components/parameters/clientId'
+  logsCancelLoadReply:
+    address: '/rpc/v1/wb_logs/logs/CancelLoad/{clientId}/reply'
+    messages:
+      logsCancelLoadReply:
+        $ref: '#/components/messages/logsCancelLoadReply'
+    parameters:
+      clientId:
+        $ref: '#/components/parameters/clientId'
+operations:
+  logsList:
+    action: send
+    channel:
+      $ref: '#/channels/logsList'
+    traits:
+      - $ref: '#/components/operationTraits/mqtt'
+    messages:
+      - $ref: '#/channels/logsList/messages/logsList'
+    reply:
+      channel:
+        $ref: '#/channels/logsListReply'
+      messages:
+        - $ref: '#/channels/logsListReply/messages/logsListReply'
+  logsLoad:
+    action: send
+    channel:
+      $ref: '#/channels/logsLoad'
+    traits:
+      - $ref: '#/components/operationTraits/mqtt'
+    messages:
+      - $ref: '#/channels/logsLoad/messages/logsLoad'
+    reply:
+      channel:
+        $ref: '#/channels/logsLoadReply'
+      messages:
+        - $ref: '#/channels/logsLoadReply/messages/logsLoadReply'
+  logsCancelLoad:
+    action: send
+    channel:
+      $ref: '#/channels/logsCancelLoad'
+    traits:
+      - $ref: '#/components/operationTraits/mqtt'
+    messages:
+      - $ref: '#/channels/logsCancelLoad/messages/logsCancelLoad'
+    reply:
+      channel:
+        $ref: '#/channels/logsCancelLoadReply'
+      messages:
+        - $ref: '#/channels/logsCancelLoadReply/messages/logsCancelLoadReply'
+components:
+  messages:
+    logsList:
+      name: logsList
+      payload:
+        $ref: '#/components/schemas/logsListPayload'
+    logsListReply:
+      name: logsListReply
+      payload:
+        $ref: '#/components/schemas/logsListReplyPayload'
+    logsLoad:
+      name: logsLoad
+      payload:
+        $ref: '#/components/schemas/logsLoadPayload'
+    logsLoadReply:
+      name: logsLoadReply
+      payload:
+        $ref: '#/components/schemas/logsLoadReplyPayload'
+    logsCancelLoad:
+      name: logsCancelLoad
+      payload:
+        $ref: '#/components/schemas/logsCancelLoadPayload'
+    logsCancelLoadReply:
+      name: logsCancelLoadReply
+      payload:
+        $ref: '#/components/schemas/logsCancelLoadReplyPayload'
+  schemas:
+    levelItem:
+      description: Уровень важности сообщения
+      type: number
+      enum:
+        - 0
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        - 6
+        - 7
+      x-enumDescriptions:
+        - emerg (0)
+        - alert (1)
+        - crit (2)
+        - err (3)
+        - warning (4)
+        - notice (5)
+        - info (6)
+        - debug (7)
+    bootItem:
+      type: object
+      properties:
+        hash:
+          description: ID сеанса (https://www.freedesktop.org/software/systemd/man/systemd.journal-fields.html#_BOOT_ID=)
+          type: string
+        start:
+          description: Временная метка начала сеанса (UNIX timestamp UTC)
+          type: number
+        end:
+          description: Временная метка завершения сеанса (UNIX timestamp UTC), отсутствует для текущего сеанса
+          type: number
+      required:
+        - hash
+        - start
+    directionItem:
+      description: Направление выборки относительно курсора
+      type: string
+      enum:
+        - forward
+        - backward
+      default: backward
+    logsListPayload:
+      type: object
+      properties:
+        id:
+          type: number
+        params:
+          type: object
+      required:
+        - id
+        - params
+    logsListReplyPayload:
+      type: object
+      properties:
+        id:
+          type: number
+        result:
+          type: array
+          items:
+            type: object
+            properties:
+              boots:
+                description: Массив сеансов журнала
+                type: array
+                items:
+                  $ref: '#/components/schemas/bootItem'
+              services:
+                description: Массив названий сервисов, установленных на контроллере
+                type: array
+                items:
+                  type: string
+            required:
+              - boots
+              - services
+      required:
+        - id
+        - result
+    logsLoadPayload:
+      type: object
+      properties:
+        id:
+          type: number
+        params:
+          type: object
+          properties:
+            boot:
+              description: ID сеанса (https://www.freedesktop.org/software/systemd/man/systemd.journal-fields.html#_BOOT_ID=)
+              type: string
+            service:
+              description: Название сервиса
+              type: string
+            time:
+              description: Временная метка первого сообщения в логе (UNIX timestamp UTC) в секундах
+              type: number
+            levels:
+              description: Массив с номерами уровней важности сообщений. Если не указан, выбираются все сообщения
+              type: array
+              items:
+                $ref: '#/components/schemas/levelItem'
+              default:
+                - 0
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+                - 6
+                - 7
+            pattern:
+              description: Шаблон поиска сообщений, может содержать строку или регулярное выражение
+              type: string
+            cursor:
+              type: object
+              properties:
+                direction:
+                  $ref: '#/components/schemas/directionItem'
+                id:
+                  description: Уникальный идентификатор сообщения в journald
+                  type: string
+            limit:
+              description: Максимальное количество записей в ответе
+              type: number
+              default: 100
+              maximum: 100
+            case-sensitive:
+              description: Учитывать регистр символов при поиске по шаблону
+              type: boolean
+              default: true
+            regex:
+              description: Шаблон в виде регулярного выражения
+              type: boolean
+              default: false
+      required:
+        - id
+        - params
+    logsLoadReplyPayload:
+      type: object
+      properties:
+        id:
+          type: number
+        result:
+          type: array
+          items:
+            type: object
+            properties:
+              msg:
+                description: Текст сообщения
+                type: string
+              service:
+                description: Название сервиса, передаётся, если не было указано в запросе
+                type: string
+              level:
+                description: Уровень сообщения, не передаётся для уровня SYS_INFO(6)
+                allOf:
+                  - $ref: '#/components/schemas/levelItem'
+                default: 6
+              time:
+                description: Временная метка (UNIX timestamp UTC) в миллисекундах
+                type: number
+              cursor:
+                description: Уникальный идентификатор сообщения в journald (https://www.freedesktop.org/software/systemd/man/systemd.journal-fields.html#__CURSOR=). Может присутствовать в первом и последнем объекте массива
+                type: string
+      required:
+        - id
+        - result
+    logsCancelLoadPayload:
+      type: object
+      properties:
+        id:
+          type: number
+        params:
+          type: object
+      required:
+        - id
+        - params
+    logsCancelLoadReplyPayload:
+      type: object
+      properties:
+        id:
+          type: number
+        result:
+          type: object
+          const: null
+      required:
+        - id
+        - result
+  parameters:
+    clientId:
+      description: UUID
+  operationTraits:
+    mqtt:
+      bindings:
+        mqtt:
+          qos: 1
