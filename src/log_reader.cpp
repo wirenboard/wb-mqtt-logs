@@ -79,7 +79,7 @@ namespace
     Json::Value GetBoots()
     {
         Json::Value res;
-        auto boots = ExecCommand("journalctl --utc --list-boots");
+        auto boots = ExecCommand("TZ=UTC journalctl --list-boots");
         std::reverse(boots.begin(), boots.end());
         for (const auto& boot: boots) {
             try {
