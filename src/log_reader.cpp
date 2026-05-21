@@ -445,14 +445,15 @@ TMQTTJournaldGateway::~TMQTTJournaldGateway()
 Json::Value TMQTTJournaldGateway::List(const Json::Value& /*params*/)
 {
     LOG(Debug) << "Run RPC List()";
-    Json::Value res;
     try {
+        Json::Value res;
         res["boots"] = Boots;
         res["services"] = GetServices();
+        return res;
     } catch (const std::exception& e) {
         LOG(Debug) << e.what();
+        throw;
     }
-    return res;
 }
 
 Json::Value TMQTTJournaldGateway::Load(const Json::Value& params)
