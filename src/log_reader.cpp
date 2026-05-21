@@ -320,7 +320,8 @@ namespace
         matcher.reset(msg);
         bool ok = matcher.find(status);
         if (U_FAILURE(status)) {
-            throw std::runtime_error("Error searching for pattern '" + UnicodeToUtf8(matcher.pattern().pattern()) + "'");
+            throw std::runtime_error("Error searching for pattern '" + UnicodeToUtf8(matcher.pattern().pattern()) +
+                                     "'");
         }
         return ok;
     }
