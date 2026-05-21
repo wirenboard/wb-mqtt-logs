@@ -188,17 +188,25 @@ namespace
         return (UnicodeString(msg).foldCase().indexOf(UnicodeString(pattern).foldCase()) >= 0);
     }
 
+    std::string UnicodeToUtf8(const UnicodeString& value)
+    {
+        std::string result;
+        value.toUTF8String(result);
+        return result;
+    }
+
     bool MatchesRegex(const UnicodeString& msg, const UnicodeString& pattern, bool caseSensitive)
     {
         UErrorCode status = U_ZERO_ERROR;
         RegexMatcher m(pattern, (caseSensitive ? 0 : UREGEX_CASE_INSENSITIVE), status);
         if (U_FAILURE(status)) {
-            throw std::runtime_error("Could not create a RegexMatcher object");
+            throw std::runtime_error("Could not create a RegexMatcher object for pattern '" + UnicodeToUtf8(pattern) +
+                                     "'");
         }
         m.reset(msg);
         bool ok = m.find(status);
         if (U_FAILURE(status)) {
-            throw std::runtime_error("Error searching for pattern");
+            throw std::runtime_error("Error searching for pattern '" + UnicodeToUtf8(pattern) + "'");
         }
         return ok;
     }
@@ -442,7 +450,7 @@ Json::Value TMQTTJournaldGateway::List(const Json::Value& /*params*/)
         res["boots"] = Boots;
         res["services"] = GetServices();
     } catch (const std::exception& e) {
-        LOG(Error) << e.what();
+        LOG(Debug) << e.what();
     }
     return res;
 }
@@ -454,7 +462,7 @@ Json::Value TMQTTJournaldGateway::Load(const Json::Value& params)
         CancelLoading = false;
         return GetLogs(params, CancelLoading, BootTime);
     } catch (const std::exception& e) {
-        LOG(Error) << e.what();
+        LOG(Debug) << e.what();
         throw;
     }
 }
