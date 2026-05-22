@@ -228,9 +228,10 @@ namespace
         auto pattern = UnicodeString::fromUTF8(params.get("pattern", "").asString());
         auto caseSensitive = params.get("case-sensitive", true).asBool();
         auto regEx = params.get("regex", false).asBool();
+        auto logs = ExecCommand("dmesg --color=never --force-prefix");
 
-        for (const auto& s: ExecCommand("dmesg --color=never --force-prefix")) {
-            Json::Value entry(ParseDmesgLog(s, bootTime));
+        for (auto it = logs.rbegin(); it != logs.rend(); ++it) {
+            Json::Value entry(ParseDmesgLog(*it, bootTime));
 
             if (!pattern.isEmpty()) {
                 auto msg = UnicodeString::fromUTF8(entry["msg"].asString());
