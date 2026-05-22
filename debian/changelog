@@ -1,6 +1,6 @@
 wb-mqtt-logs (1.5.6) stable; urgency=medium
 
-  * Fix order of dmesg log etries in RPC Load response
+  * Fix order of dmesg log entries in RPC Load response
 
  -- Nikolay Korotkiy <nikolay.korotkiy@wirenboard.com>  Fri, 22 May 2026 16:30:00 +0400
 
