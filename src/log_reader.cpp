@@ -346,8 +346,10 @@ namespace
     {
         Json::Value res(Json::arrayValue);
 
-        for (const auto& s: ExecCommand("dmesg --color=never --force-prefix")) {
-            Json::Value entry(ParseDmesgLog(s, bootTime));
+        auto logs = ExecCommand("dmesg --color=never --force-prefix");
+
+        for (auto it = logs.rbegin(); it != logs.rend(); ++it) {
+            Json::Value entry(ParseDmesgLog(*it, bootTime));
 
             if (!params.Pattern.isEmpty()) {
                 auto msg = UnicodeString::fromUTF8(entry["msg"].asString());
