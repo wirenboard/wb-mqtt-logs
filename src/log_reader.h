@@ -21,4 +21,5 @@ private:
     WBMQTT::PMqttRpcServer CancelRequestsRpcServer;
     Json::Value Boots;
     std::atomic_bool CancelLoading;
+    std::chrono::system_clock::time_point BootTime;
 };

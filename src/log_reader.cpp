@@ -289,9 +289,7 @@ namespace
 
     void ApplyJournalFilter(sd_journal* j, const TLoadParams& params)
     {
-        if (params.Service == DMESG_SERVICE) {
-            SdThrowError(sd_journal_add_match(j, "_TRANSPORT=kernel", 0), "Adding match failed");
-        } else if (!params.Service.empty()) {
+        if (!params.Service.empty()) {
             SdThrowError(sd_journal_add_match(j, ("_SYSTEMD_UNIT=" + params.Service).c_str(), 0),
                          "Adding match failed");
         }
@@ -324,6 +322,49 @@ namespace
                                      "'");
         }
         return ok;
+    }
+
+    Json::Value ParseDmesgLog(const std::string& line, std::chrono::system_clock::time_point bootTime)
+    {
+        Json::Value entry;
+        size_t p = 0;
+        if (line[0] == '[') {
+            auto sec = strtod(line.c_str() + 1, nullptr);
+            auto t = bootTime + std::chrono::milliseconds(static_cast<std::chrono::milliseconds::rep>(sec * 1000));
+            entry["time"] = std::chrono::duration_cast<std::chrono::milliseconds>(t.time_since_epoch()).count();
+            p = line.find(']');
+            p = (p == std::string::npos) ? 0 : p + 1;
+            if (line[p] == ' ') {
+                ++p;
+            }
+        }
+        entry["msg"] = line.substr(p);
+        return entry;
+    }
+
+    Json::Value GetDmesgLogs(const TLoadParams& params, std::chrono::system_clock::time_point bootTime)
+    {
+        Json::Value res(Json::arrayValue);
+
+        for (const auto& s: ExecCommand("dmesg --color=never --force-prefix")) {
+            Json::Value entry(ParseDmesgLog(s, bootTime));
+
+            if (!params.Pattern.isEmpty()) {
+                auto msg = UnicodeString::fromUTF8(entry["msg"].asString());
+                if (params.RegEx) {
+                    if (!MatchesRegex(*params.Matcher.get(), msg)) {
+                        continue;
+                    }
+                } else {
+                    if (!HasSubstring(msg, params.Pattern, params.CaseSensitive)) {
+                        continue;
+                    }
+                }
+            }
+
+            res.append(entry);
+        }
+        return res;
     }
 
     // libwbmqtt1 log prefixes to syslog severity levels map
@@ -467,6 +508,26 @@ namespace
         }
         return res;
     }
+
+    Json::Value GetLogs(const TLoadParams& params,
+                        std::atomic_bool& cancelLoading,
+                        std::chrono::system_clock::time_point bootTime)
+    {
+        if (params.Service == DMESG_SERVICE) {
+            return GetDmesgLogs(params, bootTime);
+        }
+        return GetJouralctlLogs(params, cancelLoading);
+    }
+
+    std::chrono::system_clock::time_point GetBootTime()
+    {
+        auto time = std::chrono::system_clock::now();
+        struct sysinfo si;
+        if (sysinfo(&si) == 0) {
+            time -= std::chrono::seconds(si.uptime);
+        }
+        return time;
+    }
 } // namespace
 
 TMQTTJournaldGateway::TMQTTJournaldGateway(PMqttClient mqttClient,
@@ -476,7 +537,8 @@ TMQTTJournaldGateway::TMQTTJournaldGateway(PMqttClient mqttClient,
       RequestsRpcServer(requestsRpcServer),
       CancelRequestsRpcServer(cancelRequestsRpcServer),
       Boots(GetBoots()),
-      CancelLoading(false)
+      CancelLoading(false),
+      BootTime(GetBootTime())
 {
     RequestsRpcServer->RegisterMethod("logs",
                                       "List",
@@ -522,7 +584,7 @@ Json::Value TMQTTJournaldGateway::Load(const Json::Value& params)
     }
 
     try {
-        return GetJouralctlLogs(loadParams, CancelLoading);
+        return GetLogs(loadParams, CancelLoading, BootTime);
     } catch (const std::exception& e) {
         LOG(Error) << e.what();
         throw;
