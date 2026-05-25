@@ -1,3 +1,9 @@
+wb-mqtt-logs (1.5.7) stable; urgency=medium
+
+  * Improve logging
+
+ -- Nikolay Korotkiy <nikolay.korotkiy@wirenboard.com>  Mon, 25 May 2026 10:30:00 +0400
+
 wb-mqtt-logs (1.5.6) stable; urgency=medium
 
   * Fix order of dmesg log entries in RPC Load response

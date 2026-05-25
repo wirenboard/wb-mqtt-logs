@@ -3,6 +3,8 @@
 #include "log.h"
 
 #include <algorithm>
+#include <limits>
+#include <memory>
 #include <set>
 #include <unicode/regex.h>
 
@@ -23,6 +25,95 @@ namespace
 {
     const auto DMESG_SERVICE = "dmesg";
     const uint32_t MAX_LOG_RECORDS = 100;
+
+    std::string GetJsonTypeName(const Json::Value& value)
+    {
+        switch (value.type()) {
+            case Json::nullValue:
+                return "null";
+            case Json::intValue:
+            case Json::uintValue:
+                return "integer";
+            case Json::realValue:
+                return "number";
+            case Json::stringValue:
+                return "string";
+            case Json::booleanValue:
+                return "boolean";
+            case Json::arrayValue:
+                return "array";
+            case Json::objectValue:
+                return "object";
+        }
+        return "unknown";
+    }
+
+    bool GetBoolParam(const Json::Value& value, const std::string& name, bool defaultValue)
+    {
+        if (value.isNull()) {
+            return defaultValue;
+        }
+        if (!value.isBool()) {
+            throw std::runtime_error("Invalid request parameter '" + name + "': expected boolean, got " +
+                                     GetJsonTypeName(value));
+        }
+        return value.asBool();
+    }
+
+    std::string GetStringParam(const Json::Value& value, const std::string& name, const std::string& defaultValue)
+    {
+        if (value.isNull()) {
+            return defaultValue;
+        }
+        if (!value.isString()) {
+            throw std::runtime_error("Invalid request parameter '" + name + "': expected string, got " +
+                                     GetJsonTypeName(value));
+        }
+        return value.asString();
+    }
+
+    uint32_t GetUIntParam(const Json::Value& value, const std::string& name, uint32_t defaultValue)
+    {
+        if (value.isNull()) {
+            return defaultValue;
+        }
+        if (!value.isUInt()) {
+            throw std::runtime_error("Invalid request parameter '" + name + "': expected unsigned integer, got " +
+                                     GetJsonTypeName(value));
+        }
+        return value.asUInt();
+    }
+
+    int64_t GetInt64Param(const Json::Value& value, const std::string& name, int64_t defaultValue)
+    {
+        if (value.isNull()) {
+            return defaultValue;
+        }
+        if (!value.isIntegral()) {
+            throw std::runtime_error("Invalid request parameter '" + name + "': expected integer, got " +
+                                     GetJsonTypeName(value));
+        }
+        if (value.isUInt64() && value.asUInt64() > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+            throw std::runtime_error("Invalid request parameter '" + name + "': integer is out of int64 range");
+        }
+        return value.asInt64();
+    }
+
+    const Json::Value& GetObjectParam(const Json::Value& value, const std::string& name)
+    {
+        if (!value.isObject()) {
+            throw std::runtime_error("Invalid request parameter '" + name + "': expected object, got " +
+                                     GetJsonTypeName(value));
+        }
+        return value;
+    }
+
+    std::string UnicodeToUtf8(const UnicodeString& value)
+    {
+        std::string result;
+        value.toUTF8String(result);
+        return result;
+    }
 
     void SdThrowError(int res, const std::string& msg)
     {
@@ -107,11 +198,6 @@ namespace
         return res;
     }
 
-    uint32_t GetMaxLogsEntries(const Json::Value& params)
-    {
-        return std::min(MAX_LOG_RECORDS, params.get("limit", MAX_LOG_RECORDS).asUInt());
-    }
-
     const char* GetData(sd_journal* j, const std::string& fieldName)
     {
         const char* d;
@@ -123,61 +209,99 @@ namespace
         return nullptr;
     }
 
-    struct TJournalctlFilterParams
+    struct TLoadParams
     {
         bool Backward = true;
         std::string Service;
         uint32_t MaxEntries = MAX_LOG_RECORDS;
         std::chrono::microseconds From = std::chrono::microseconds::zero();
         std::string Cursor;
+        std::string Boot;
+        std::vector<int> Levels;
         UnicodeString Pattern;
         bool CaseSensitive = true;
         bool RegEx = false;
+        std::unique_ptr<RegexMatcher> Matcher;
     };
 
-    TJournalctlFilterParams SetFilter(sd_journal* j, const Json::Value& params)
+    TLoadParams ParseLoadParams(const Json::Value& params)
     {
-        TJournalctlFilterParams filter;
-        auto service = params.get("service", "").asString();
-        if (!service.empty()) {
-            SdThrowError(sd_journal_add_match(j, ("_SYSTEMD_UNIT=" + service).c_str(), 0), "Adding match failed");
-            filter.Service = service;
+        if (!params.isObject()) {
+            throw std::runtime_error("Invalid request: expected object, got " + GetJsonTypeName(params));
         }
 
-        filter.MaxEntries = GetMaxLogsEntries(params);
-
-        auto boot = params.get("boot", "").asString();
-        if (!boot.empty()) {
-            sd_journal_add_match(j, ("_BOOT_ID=" + boot).c_str(), 0);
-        }
+        TLoadParams loadParams;
+        loadParams.Service = GetStringParam(params["service"], "service", "");
+        loadParams.MaxEntries = std::min(MAX_LOG_RECORDS, GetUIntParam(params["limit"], "limit", MAX_LOG_RECORDS));
+        loadParams.Boot = GetStringParam(params["boot"], "boot", "");
 
         std::set<int> levels;
-        for (const auto& lv: params["levels"]) {
-            if (lv.isInt()) {
+        if (!params["levels"].isNull()) {
+            const auto& levelsParam = params["levels"];
+            if (!levelsParam.isArray()) {
+                throw std::runtime_error("Invalid request parameter 'levels': expected array, got " +
+                                         GetJsonTypeName(levelsParam));
+            }
+            for (const auto& lv: levelsParam) {
+                if (!lv.isInt()) {
+                    throw std::runtime_error("Invalid request parameter 'levels': expected array of integers");
+                }
                 int l = lv.asInt();
-                if (l >= LOG_EMERG && l <= LOG_DEBUG && 0 == levels.count(l)) {
-                    levels.insert(l);
-                    SdThrowError(sd_journal_add_match(j, ("PRIORITY=" + std::to_string(l)).c_str(), 0),
-                                 "Adding match failed");
+                if (l >= LOG_EMERG && l <= LOG_DEBUG && levels.insert(l).second) {
+                    loadParams.Levels.push_back(l);
                 }
             }
         }
 
-        if (params.isMember("time")) {
-            filter.From = std::chrono::microseconds(params["time"].asInt64() * 1000000);
+        if (!params["time"].isNull()) {
+            loadParams.From = std::chrono::microseconds(GetInt64Param(params["time"], "time", 0) * 1000000);
         }
 
-        if (params.isMember("cursor")) {
-            auto& cursor = params["cursor"];
-            filter.Cursor = cursor.get("id", "").asString();
-            filter.Backward = (cursor.get("direction", "backward").asString() == "backward");
+        if (!params["cursor"].isNull()) {
+            const auto& cursor = GetObjectParam(params["cursor"], "cursor");
+            loadParams.Cursor = GetStringParam(cursor["id"], "cursor.id", "");
+            auto direction = GetStringParam(cursor["direction"], "cursor.direction", "backward");
+            if (direction != "backward" && direction != "forward") {
+                throw std::runtime_error(
+                    "Invalid request parameter 'cursor.direction': expected 'backward' or 'forward'");
+            }
+            loadParams.Backward = (direction == "backward");
         }
 
-        filter.Pattern = UnicodeString::fromUTF8(params.get("pattern", "").asString());
-        filter.CaseSensitive = params.get("case-sensitive", true).asBool();
-        filter.RegEx = params.get("regex", false).asBool();
+        loadParams.Pattern = UnicodeString::fromUTF8(GetStringParam(params["pattern"], "pattern", ""));
+        loadParams.CaseSensitive = GetBoolParam(params["case-sensitive"], "case-sensitive", true);
+        loadParams.RegEx = GetBoolParam(params["regex"], "regex", false);
+        if (loadParams.RegEx && !loadParams.Pattern.isEmpty()) {
+            UErrorCode status = U_ZERO_ERROR;
+            loadParams.Matcher =
+                std::make_unique<RegexMatcher>(loadParams.Pattern,
+                                               UnicodeString(),
+                                               (loadParams.CaseSensitive ? 0 : UREGEX_CASE_INSENSITIVE),
+                                               status);
+            if (U_FAILURE(status)) {
+                throw std::runtime_error("Could not create a RegexMatcher object for pattern '" +
+                                         UnicodeToUtf8(loadParams.Pattern) + "'");
+            }
+        }
 
-        return filter;
+        return loadParams;
+    }
+
+    void ApplyJournalFilter(sd_journal* j, const TLoadParams& params)
+    {
+        if (!params.Service.empty()) {
+            SdThrowError(sd_journal_add_match(j, ("_SYSTEMD_UNIT=" + params.Service).c_str(), 0),
+                         "Adding match failed");
+        }
+
+        if (!params.Boot.empty()) {
+            SdThrowError(sd_journal_add_match(j, ("_BOOT_ID=" + params.Boot).c_str(), 0), "Adding match failed");
+        }
+
+        for (const auto level: params.Levels) {
+            SdThrowError(sd_journal_add_match(j, ("PRIORITY=" + std::to_string(level)).c_str(), 0),
+                         "Adding match failed");
+        }
     }
 
     bool HasSubstring(const UnicodeString& msg, const UnicodeString& pattern, bool caseSensitive)
@@ -188,17 +312,14 @@ namespace
         return (UnicodeString(msg).foldCase().indexOf(UnicodeString(pattern).foldCase()) >= 0);
     }
 
-    bool MatchesRegex(const UnicodeString& msg, const UnicodeString& pattern, bool caseSensitive)
+    bool MatchesRegex(RegexMatcher& matcher, const UnicodeString& msg)
     {
         UErrorCode status = U_ZERO_ERROR;
-        RegexMatcher m(pattern, (caseSensitive ? 0 : UREGEX_CASE_INSENSITIVE), status);
+        matcher.reset(msg);
+        bool ok = matcher.find(status);
         if (U_FAILURE(status)) {
-            throw std::runtime_error("Could not create a RegexMatcher object");
-        }
-        m.reset(msg);
-        bool ok = m.find(status);
-        if (U_FAILURE(status)) {
-            throw std::runtime_error("Error searching for pattern");
+            throw std::runtime_error("Error searching for pattern '" + UnicodeToUtf8(matcher.pattern().pattern()) +
+                                     "'");
         }
         return ok;
     }
@@ -221,26 +342,23 @@ namespace
         return entry;
     }
 
-    Json::Value GetDmesgLogs(const Json::Value& params, std::chrono::system_clock::time_point bootTime)
+    Json::Value GetDmesgLogs(const TLoadParams& params, std::chrono::system_clock::time_point bootTime)
     {
         Json::Value res(Json::arrayValue);
 
-        auto pattern = UnicodeString::fromUTF8(params.get("pattern", "").asString());
-        auto caseSensitive = params.get("case-sensitive", true).asBool();
-        auto regEx = params.get("regex", false).asBool();
         auto logs = ExecCommand("dmesg --color=never --force-prefix");
 
         for (auto it = logs.rbegin(); it != logs.rend(); ++it) {
             Json::Value entry(ParseDmesgLog(*it, bootTime));
 
-            if (!pattern.isEmpty()) {
+            if (!params.Pattern.isEmpty()) {
                 auto msg = UnicodeString::fromUTF8(entry["msg"].asString());
-                if (regEx) {
-                    if (!MatchesRegex(msg, pattern, caseSensitive)) {
+                if (params.RegEx) {
+                    if (!MatchesRegex(*params.Matcher.get(), msg)) {
                         continue;
                     }
                 } else {
-                    if (!HasSubstring(msg, pattern, caseSensitive)) {
+                    if (!HasSubstring(msg, params.Pattern, params.CaseSensitive)) {
                         continue;
                     }
                 }
@@ -256,7 +374,11 @@ namespace
                                                                          {"WARNING:", LOG_WARNING},
                                                                          {"DEBUG:", LOG_DEBUG}};
 
-    bool AddMsg(sd_journal* j, Json::Value& entry, const UnicodeString& pattern, bool caseSensitive, bool regEx)
+    bool AddMsg(sd_journal* j,
+                Json::Value& entry,
+                const UnicodeString& pattern,
+                bool caseSensitive,
+                RegexMatcher* matcher)
     {
         const char* d = GetData(j, "MESSAGE");
         if (d == nullptr) {
@@ -264,8 +386,8 @@ namespace
         }
         if (!pattern.isEmpty()) {
             auto msg = UnicodeString::fromUTF8(d);
-            if (regEx) {
-                if (!MatchesRegex(msg, pattern, caseSensitive)) {
+            if (matcher != nullptr) {
+                if (!MatchesRegex(*matcher, msg)) {
                     return false;
                 }
             } else {
@@ -331,37 +453,38 @@ namespace
         }
     }
 
-    Json::Value MakeJouralctlRequest(const Json::Value& params, std::atomic_bool& cancelLoading)
+    Json::Value MakeJouralctlRequest(const TLoadParams& params, std::atomic_bool& cancelLoading)
     {
         Json::Value res(Json::arrayValue);
         sd_journal* j = nullptr;
         SdThrowError(sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY), "Failed to open journal");
         std::unique_ptr<sd_journal, decltype(&sd_journal_close)> journalPtr(j, &sd_journal_close);
 
-        auto filter = SetFilter(j, params);
+        ApplyJournalFilter(j, params);
 
-        auto moveFn = filter.Backward ? sd_journal_previous : sd_journal_next;
-        if (!filter.Cursor.empty()) {
-            SdThrowError(sd_journal_seek_cursor(j, filter.Cursor.c_str()), "Failed to seek to tail of journal");
+        auto moveFn = params.Backward ? sd_journal_previous : sd_journal_next;
+        if (!params.Cursor.empty()) {
+            SdThrowError(sd_journal_seek_cursor(j, params.Cursor.c_str()), "Failed to seek to tail of journal");
             moveFn(j); // Pass pointed by cursor record
-        } else if (filter.From.count() > 0) {
-            SdThrowError(sd_journal_seek_realtime_usec(j, filter.From.count()), "Failed to seek to tail of journal");
+        } else if (params.From.count() > 0) {
+            SdThrowError(sd_journal_seek_realtime_usec(j, params.From.count()), "Failed to seek to tail of journal");
         } else {
             SdThrowError(sd_journal_seek_tail(j), "Failed to seek to tail of journal");
         }
 
         int r = moveFn(j);
-        while (r > 0 && filter.MaxEntries && !cancelLoading) {
+        auto remainingEntries = params.MaxEntries;
+        while (r > 0 && remainingEntries && !cancelLoading) {
             Json::Value item;
-            if (AddMsg(j, item, filter.Pattern, filter.CaseSensitive, filter.RegEx)) {
+            if (AddMsg(j, item, params.Pattern, params.CaseSensitive, params.Matcher.get())) {
                 AddTimestamp(j, item);
                 AddCursor(j, item);
                 AddPriority(j, item);
-                if (filter.Service.empty()) {
+                if (params.Service.empty()) {
                     AddService(j, item);
                 }
                 res.append(item);
-                --filter.MaxEntries;
+                --remainingEntries;
             }
             r = moveFn(j);
         }
@@ -372,13 +495,13 @@ namespace
 
         // Forward queries return rows in ascending order, but we want a descending
         // order
-        if (!filter.Backward) {
+        if (!params.Backward) {
             std::reverse(res.begin(), res.end());
         }
         return res;
     }
 
-    Json::Value GetJouralctlLogs(const Json::Value& params, std::atomic_bool& cancelLoading)
+    Json::Value GetJouralctlLogs(const TLoadParams& params, std::atomic_bool& cancelLoading)
     {
         Json::Value res(MakeJouralctlRequest(params, cancelLoading));
         if (res.size() > 2) {
@@ -388,11 +511,11 @@ namespace
         return res;
     }
 
-    Json::Value GetLogs(const Json::Value& params,
+    Json::Value GetLogs(const TLoadParams& params,
                         std::atomic_bool& cancelLoading,
                         std::chrono::system_clock::time_point bootTime)
     {
-        if (params.get("service", "").asString() == DMESG_SERVICE) {
+        if (params.Service == DMESG_SERVICE) {
             return GetDmesgLogs(params, bootTime);
         }
         return GetJouralctlLogs(params, cancelLoading);
@@ -438,29 +561,39 @@ TMQTTJournaldGateway::~TMQTTJournaldGateway()
 Json::Value TMQTTJournaldGateway::List(const Json::Value& /*params*/)
 {
     LOG(Debug) << "Run RPC List()";
-    Json::Value res;
     try {
+        Json::Value res;
         res["boots"] = Boots;
         res["services"] = GetServices();
-    } catch (const std::exception& e) {
-        LOG(Error) << e.what();
-    }
-    return res;
-}
-
-Json::Value TMQTTJournaldGateway::Load(const Json::Value& params)
-{
-    LOG(Debug) << "Run RPC Load()";
-    try {
-        CancelLoading = false;
-        return GetLogs(params, CancelLoading, BootTime);
+        return res;
     } catch (const std::exception& e) {
         LOG(Error) << e.what();
         throw;
     }
 }
 
-Json::Value TMQTTJournaldGateway::CancelLoad(const Json::Value& params)
+Json::Value TMQTTJournaldGateway::Load(const Json::Value& params)
+{
+    LOG(Debug) << "Run RPC Load()";
+    CancelLoading = false;
+
+    TLoadParams loadParams;
+    try {
+        loadParams = ParseLoadParams(params);
+    } catch (const std::exception& e) {
+        LOG(Debug) << e.what();
+        throw;
+    }
+
+    try {
+        return GetLogs(loadParams, CancelLoading, BootTime);
+    } catch (const std::exception& e) {
+        LOG(Error) << e.what();
+        throw;
+    }
+}
+
+Json::Value TMQTTJournaldGateway::CancelLoad(const Json::Value& /*params*/)
 {
     LOG(Debug) << "Run RPC CancelLoad()";
     CancelLoading = true;
