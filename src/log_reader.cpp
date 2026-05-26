@@ -248,8 +248,8 @@ namespace
             loadParams.From = std::chrono::microseconds(GetInt64Param(params["time"], "time", 0) * 1000000);
         }
 
-        if (!params["cursor"].isNull()) {
-            const auto cursor = params["cursor"];
+        const auto cursor = params["cursor"];
+        if (!cursor.isNull()) {
             if (!cursor.isObject()) {
                 throw std::runtime_error("Invalid request parameter 'cursor': expected object, got " +
                                          GetJsonTypeName(cursor));
