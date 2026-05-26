@@ -99,15 +99,6 @@ namespace
         return value.asInt64();
     }
 
-    const Json::Value& GetObjectParam(const Json::Value& value, const std::string& name)
-    {
-        if (!value.isObject()) {
-            throw std::runtime_error("Invalid request parameter '" + name + "': expected object, got " +
-                                     GetJsonTypeName(value));
-        }
-        return value;
-    }
-
     std::string UnicodeToUtf8(const UnicodeString& value)
     {
         std::string result;
@@ -258,7 +249,11 @@ namespace
         }
 
         if (!params["cursor"].isNull()) {
-            const auto& cursor = GetObjectParam(params["cursor"], "cursor");
+            const auto cursor = params["cursor"];
+            if (!cursor.isObject()) {
+                throw std::runtime_error("Invalid request parameter 'cursor': expected object, got " +
+                                         GetJsonTypeName(cursor));
+            }
             loadParams.Cursor = GetStringParam(cursor["id"], "cursor.id", "");
             auto direction = GetStringParam(cursor["direction"], "cursor.direction", "backward");
             if (direction != "backward" && direction != "forward") {
