@@ -143,7 +143,7 @@ int main(int argc, char* argv[])
     WBMQTT::SignalHandling::SetOnTimeout(DRIVER_STOP_TIMEOUT_S, [&] {
         Error.Log() << "Driver takes too long to stop. Exiting.";
         cerr << "Error: DRIVER_STOP_TIMEOUT_S" << endl;
-        exit(2);
+        exit(1);
     });
     WBMQTT::SignalHandling::Start();
 
@@ -165,7 +165,7 @@ int main(int argc, char* argv[])
         mqttClient->Stop();
     } catch (const std::exception& e) {
         Error.Log() << e.what();
-        return 2;
+        return 1;
     }
-    return 0;
+    return 7;
 }

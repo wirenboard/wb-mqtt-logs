@@ -1,3 +1,10 @@
+wb-mqtt-logs (1.7.0) stable; urgency=medium
+
+  * Exit with 1 instead of 2 on runtime errors and stop timeout, 7 on SIGTERM/SIGINT
+  * systemd unit: Restart=on-failure, codes 2 and 6 are not restarted, 7 is success
+
+ -- Ekaterina Volkova <ekaterina.volkova@wirenboard.com>  Thu, 20 Aug 2026 13:18:25 +0000
+
 wb-mqtt-logs (1.6.0) stable; urgency=medium
 
   * Port for Debian 13
