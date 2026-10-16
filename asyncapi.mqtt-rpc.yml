@@ -250,7 +250,7 @@ components:
               type: boolean
               default: true
             regex:
-              description: Шаблон в виде регулярного выражения
+              description: Шаблон в виде регулярного выражения (синтаксис PCRE2)
               type: boolean
               default: false
       required:

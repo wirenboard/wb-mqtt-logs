@@ -1,3 +1,9 @@
+wb-mqtt-logs (1.7.0) stable; urgency=medium
+
+  * Use PCRE2 instead of ICU for message filtering
+
+ -- Nikolay Korotkiy <nikolay.korotkiy@wirenboard.com>  Wed, 14 Oct 2026 18:00:00 +0400
+
 wb-mqtt-logs (1.6.0) stable; urgency=medium
 
   * Port for Debian 13

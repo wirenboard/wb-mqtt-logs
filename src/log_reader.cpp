@@ -1,12 +1,17 @@
 #include "log_reader.h"
 
 #include "log.h"
+#include "pattern_matcher.h"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <set>
-#include <unicode/regex.h>
+#include <stdexcept>
+#include <string_view>
 
 #include <sys/sysinfo.h>
 #include <syslog.h>
@@ -16,8 +21,6 @@
 #include <wblib/mqtt.h>
 
 using namespace WBMQTT;
-using icu::RegexMatcher;
-using icu::UnicodeString;
 
 #define LOG(logger) ::logger.Log() << "[logs] "
 
@@ -97,13 +100,6 @@ namespace
             throw std::runtime_error("Invalid request parameter '" + name + "': integer is out of int64 range");
         }
         return value.asInt64();
-    }
-
-    std::string UnicodeToUtf8(const UnicodeString& value)
-    {
-        std::string result;
-        value.toUTF8String(result);
-        return result;
     }
 
     void SdThrowError(int res, const std::string& msg)
@@ -189,15 +185,18 @@ namespace
         return res;
     }
 
-    const char* GetData(sd_journal* j, const std::string& fieldName)
+    // Returns the field value, or an empty view if the field is missing or empty.
+    // The data returned by sd_journal_get_data() is not NUL-terminated, so its length must be used.
+    std::string_view GetData(sd_journal* j, const std::string& fieldName)
     {
         const char* d;
         size_t l;
         int r = sd_journal_get_data(j, fieldName.c_str(), (const void**)&d, &l);
-        if (r == 0 && l > fieldName.size() + 1) {
-            return d + fieldName.size() + 1;
+        const size_t prefixSize = fieldName.size() + 1; // "FIELD="
+        if (r == 0 && l > prefixSize) {
+            return std::string_view(d + prefixSize, l - prefixSize);
         }
-        return nullptr;
+        return {};
     }
 
     struct TLoadParams
@@ -209,10 +208,7 @@ namespace
         std::string Cursor;
         std::string Boot;
         std::vector<int> Levels;
-        UnicodeString Pattern;
-        bool CaseSensitive = true;
-        bool RegEx = false;
-        std::unique_ptr<RegexMatcher> Matcher;
+        std::unique_ptr<TPatternMatcher> Matcher; // nullptr if no pattern is set
     };
 
     TLoadParams ParseLoadParams(const Json::Value& params)
@@ -263,20 +259,11 @@ namespace
             loadParams.Backward = (direction == "backward");
         }
 
-        loadParams.Pattern = UnicodeString::fromUTF8(GetStringParam(params["pattern"], "pattern", ""));
-        loadParams.CaseSensitive = GetBoolParam(params["case-sensitive"], "case-sensitive", true);
-        loadParams.RegEx = GetBoolParam(params["regex"], "regex", false);
-        if (loadParams.RegEx && !loadParams.Pattern.isEmpty()) {
-            UErrorCode status = U_ZERO_ERROR;
-            loadParams.Matcher =
-                std::make_unique<RegexMatcher>(loadParams.Pattern,
-                                               UnicodeString(),
-                                               (loadParams.CaseSensitive ? 0 : UREGEX_CASE_INSENSITIVE),
-                                               status);
-            if (U_FAILURE(status)) {
-                throw std::runtime_error("Could not create a RegexMatcher object for pattern '" +
-                                         UnicodeToUtf8(loadParams.Pattern) + "'");
-            }
+        auto pattern = GetStringParam(params["pattern"], "pattern", "");
+        auto caseSensitive = GetBoolParam(params["case-sensitive"], "case-sensitive", true);
+        auto regex = GetBoolParam(params["regex"], "regex", false);
+        if (!pattern.empty()) {
+            loadParams.Matcher = std::make_unique<TPatternMatcher>(pattern, regex, caseSensitive);
         }
 
         return loadParams;
@@ -299,41 +286,32 @@ namespace
         }
     }
 
-    bool HasSubstring(const UnicodeString& msg, const UnicodeString& pattern, bool caseSensitive)
+    // Returns the position of the message text in a dmesg line, after the "[seconds] " prefix
+    size_t GetDmesgMsgPos(const std::string& line)
     {
-        if (caseSensitive) {
-            return (msg.indexOf(pattern) >= 0);
+        if (line[0] != '[') {
+            return 0;
         }
-        return (UnicodeString(msg).foldCase().indexOf(UnicodeString(pattern).foldCase()) >= 0);
+        size_t p = line.find(']');
+        if (p == std::string::npos) {
+            return 0;
+        }
+        ++p;
+        if (line[p] == ' ') {
+            ++p;
+        }
+        return p;
     }
 
-    bool MatchesRegex(RegexMatcher& matcher, const UnicodeString& msg)
-    {
-        UErrorCode status = U_ZERO_ERROR;
-        matcher.reset(msg);
-        bool ok = matcher.find(status);
-        if (U_FAILURE(status)) {
-            throw std::runtime_error("Error searching for pattern '" + UnicodeToUtf8(matcher.pattern().pattern()) +
-                                     "'");
-        }
-        return ok;
-    }
-
-    Json::Value ParseDmesgLog(const std::string& line, std::chrono::system_clock::time_point bootTime)
+    Json::Value ParseDmesgLog(const std::string& line, size_t msgPos, std::chrono::system_clock::time_point bootTime)
     {
         Json::Value entry;
-        size_t p = 0;
         if (line[0] == '[') {
             auto sec = strtod(line.c_str() + 1, nullptr);
             auto t = bootTime + std::chrono::milliseconds(static_cast<std::chrono::milliseconds::rep>(sec * 1000));
             entry["time"] = std::chrono::duration_cast<std::chrono::milliseconds>(t.time_since_epoch()).count();
-            p = line.find(']');
-            p = (p == std::string::npos) ? 0 : p + 1;
-            if (line[p] == ' ') {
-                ++p;
-            }
         }
-        entry["msg"] = line.substr(p);
+        entry["msg"] = Json::Value(line.data() + msgPos, line.data() + line.size());
         return entry;
     }
 
@@ -344,22 +322,12 @@ namespace
         auto logs = ExecCommand("dmesg --color=never --force-prefix");
 
         for (auto it = logs.rbegin(); it != logs.rend(); ++it) {
-            Json::Value entry(ParseDmesgLog(*it, bootTime));
-
-            if (!params.Pattern.isEmpty()) {
-                auto msg = UnicodeString::fromUTF8(entry["msg"].asString());
-                if (params.RegEx) {
-                    if (!MatchesRegex(*params.Matcher.get(), msg)) {
-                        continue;
-                    }
-                } else {
-                    if (!HasSubstring(msg, params.Pattern, params.CaseSensitive)) {
-                        continue;
-                    }
-                }
+            auto msgPos = GetDmesgMsgPos(*it);
+            // Filter before building the entry, so non-matching lines cost only the match
+            if (params.Matcher && !params.Matcher->Matches(std::string_view(*it).substr(msgPos))) {
+                continue;
             }
-
-            res.append(entry);
+            res.append(ParseDmesgLog(*it, msgPos, bootTime));
         }
         return res;
     }
@@ -369,32 +337,19 @@ namespace
                                                                          {"WARNING:", LOG_WARNING},
                                                                          {"DEBUG:", LOG_DEBUG}};
 
-    bool AddMsg(sd_journal* j,
-                Json::Value& entry,
-                const UnicodeString& pattern,
-                bool caseSensitive,
-                RegexMatcher* matcher)
+    bool AddMsg(sd_journal* j, Json::Value& entry, TPatternMatcher* matcher)
     {
-        const char* d = GetData(j, "MESSAGE");
-        if (d == nullptr) {
+        auto d = GetData(j, "MESSAGE");
+        if (d.empty()) {
             return false;
         }
-        if (!pattern.isEmpty()) {
-            auto msg = UnicodeString::fromUTF8(d);
-            if (matcher != nullptr) {
-                if (!MatchesRegex(*matcher, msg)) {
-                    return false;
-                }
-            } else {
-                if (!HasSubstring(msg, pattern, caseSensitive)) {
-                    return false;
-                }
-            }
+        if (matcher != nullptr && !matcher->Matches(d)) {
+            return false;
         }
-        entry["msg"] = d;
+        entry["msg"] = Json::Value(d.data(), d.data() + d.size());
         if (!entry.isMember("level")) {
             auto it = std::find_if(LibWbMqttLogLevels.begin(), LibWbMqttLogLevels.end(), [&](const auto& p) {
-                return StringStartsWith(d, p.first);
+                return d.starts_with(p.first);
             });
             if (it != LibWbMqttLogLevels.end()) {
                 entry["level"] = it->second;
@@ -413,11 +368,14 @@ namespace
 
     void AddPriority(sd_journal* j, Json::Value& entry)
     {
-        const char* d = GetData(j, "PRIORITY");
-        if (d == nullptr) {
+        auto d = GetData(j, "PRIORITY");
+        if (d.empty()) {
             return;
         }
-        auto level = atoi(d);
+        int level;
+        if (std::from_chars(d.data(), d.data() + d.size(), level).ec != std::errc()) {
+            return;
+        }
         // journald sets LOG_INFO priority for all unprefixed messages got fom
         // stderr/stdout They priority is set in ParseMsg according to a prefix.
         if (level != LOG_INFO && !entry.isMember("level")) {
@@ -435,8 +393,8 @@ namespace
 
     void AddService(sd_journal* j, Json::Value& entry)
     {
-        const char* d = GetData(j, "_SYSTEMD_UNIT");
-        if (d == nullptr) {
+        auto d = GetData(j, "_SYSTEMD_UNIT");
+        if (d.empty()) {
             return;
         }
         std::string s(d);
@@ -471,7 +429,7 @@ namespace
         auto remainingEntries = params.MaxEntries;
         while (r > 0 && remainingEntries && !cancelLoading) {
             Json::Value item;
-            if (AddMsg(j, item, params.Pattern, params.CaseSensitive, params.Matcher.get())) {
+            if (AddMsg(j, item, params.Matcher.get())) {
                 AddTimestamp(j, item);
                 AddCursor(j, item);
                 AddPriority(j, item);
