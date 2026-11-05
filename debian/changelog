@@ -1,3 +1,10 @@
+wb-mqtt-logs (1.6.0+wb100) stable; urgency=medium
+
+  * Fix garbage at the end of long journal messages: sd_journal_get_data()
+    data is not NUL-terminated, use the returned length
+
+ -- Nikolay Korotkiy <nikolay.korotkiy@wirenboard.com>  Thu, 05 Nov 2026 12:00:00 +0400
+
 wb-mqtt-logs (1.6.0) stable; urgency=medium
 
   * Port for Debian 13

@@ -3,9 +3,11 @@
 #include "log.h"
 
 #include <algorithm>
+#include <charconv>
 #include <limits>
 #include <memory>
 #include <set>
+#include <string_view>
 #include <unicode/regex.h>
 
 #include <sys/sysinfo.h>
@@ -189,15 +191,18 @@ namespace
         return res;
     }
 
-    const char* GetData(sd_journal* j, const std::string& fieldName)
+    // Returns the field value, or an empty view if the field is missing or empty.
+    // The data returned by sd_journal_get_data() is not NUL-terminated, so its length must be used.
+    std::string_view GetData(sd_journal* j, const std::string& fieldName)
     {
         const char* d;
         size_t l;
         int r = sd_journal_get_data(j, fieldName.c_str(), (const void**)&d, &l);
-        if (r == 0 && l > fieldName.size() + 1) {
-            return d + fieldName.size() + 1;
+        const size_t prefixSize = fieldName.size() + 1; // "FIELD="
+        if (r == 0 && l > prefixSize) {
+            return std::string_view(d + prefixSize, l - prefixSize);
         }
-        return nullptr;
+        return {};
     }
 
     struct TLoadParams
@@ -375,12 +380,12 @@ namespace
                 bool caseSensitive,
                 RegexMatcher* matcher)
     {
-        const char* d = GetData(j, "MESSAGE");
-        if (d == nullptr) {
+        auto d = GetData(j, "MESSAGE");
+        if (d.empty()) {
             return false;
         }
         if (!pattern.isEmpty()) {
-            auto msg = UnicodeString::fromUTF8(d);
+            auto msg = UnicodeString::fromUTF8(icu::StringPiece(d.data(), static_cast<int32_t>(d.size())));
             if (matcher != nullptr) {
                 if (!MatchesRegex(*matcher, msg)) {
                     return false;
@@ -391,10 +396,10 @@ namespace
                 }
             }
         }
-        entry["msg"] = d;
+        entry["msg"] = Json::Value(d.data(), d.data() + d.size());
         if (!entry.isMember("level")) {
             auto it = std::find_if(LibWbMqttLogLevels.begin(), LibWbMqttLogLevels.end(), [&](const auto& p) {
-                return StringStartsWith(d, p.first);
+                return d.starts_with(p.first);
             });
             if (it != LibWbMqttLogLevels.end()) {
                 entry["level"] = it->second;
@@ -413,11 +418,14 @@ namespace
 
     void AddPriority(sd_journal* j, Json::Value& entry)
     {
-        const char* d = GetData(j, "PRIORITY");
-        if (d == nullptr) {
+        auto d = GetData(j, "PRIORITY");
+        if (d.empty()) {
             return;
         }
-        auto level = atoi(d);
+        int level;
+        if (std::from_chars(d.data(), d.data() + d.size(), level).ec != std::errc()) {
+            return;
+        }
         // journald sets LOG_INFO priority for all unprefixed messages got fom
         // stderr/stdout They priority is set in ParseMsg according to a prefix.
         if (level != LOG_INFO && !entry.isMember("level")) {
@@ -435,8 +443,8 @@ namespace
 
     void AddService(sd_journal* j, Json::Value& entry)
     {
-        const char* d = GetData(j, "_SYSTEMD_UNIT");
-        if (d == nullptr) {
+        auto d = GetData(j, "_SYSTEMD_UNIT");
+        if (d.empty()) {
             return;
         }
         std::string s(d);
